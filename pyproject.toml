@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "sludgewire"
+version = "0.1.0"
+description = "Updates congressional financial disclosure data."
+authors = ["Andrew Friedman"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+bs4 = "^0.0.1"
+pandas = "^2.0.0"
+pdfquery = "^0.4.3"
+tqdm = "^4.65.0"
+twilio = "^8.0.0"
+sqlalchemy = "^2.0.9"
+regex = "^2023.3.23"
+pymysql = "^1.0.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
