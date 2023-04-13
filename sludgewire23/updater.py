@@ -7,6 +7,7 @@ from .helpers import get_doc_list, congressDoc, make_state
 from urllib.parse import urljoin
 from twilio.rest import Client
 from tqdm import tqdm
+from typing import Literal
 
 pd.options.mode.chained_assignment = None
 
@@ -14,7 +15,7 @@ class Access:
     """
     Handles credentials and connections.
     """
-    def __init__(self, force_env=None):
+    def __init__(self, chamber=Literal['house', 'senate', 'h', 's'], force_env=None):
         __location__ = os.path.realpath(
             os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
@@ -23,8 +24,8 @@ class Access:
             ]):
             for k in [
                 'db_host', 'db_port', 'db_user', 'db_password',
-                'db_database', 'twilio_auth', 'twilio_sid',
-                'twilio_test_auth', 'twilio_test_sid', 'phone_numbers'
+                'twilio_auth', 'twilio_sid', 'twilio_test_auth', 'twilio_test_sid', 
+                'phone_numbers'
             ]:
                 setattr(self, k, os.environ[k])
         
@@ -32,6 +33,13 @@ class Access:
             config_ = json.load(open(os.path.join(__location__,'config.json'), 'rb'))
             for k in config_:
                 setattr(self, k, config_[k])
+        
+        if chamber.startswith('h'):
+            self.db_table='house_ptr'
+        elif chamber.startswith('s'):
+            self.db_table='senate_ptr'
+        else:
+            raise "bad chamber!"
 
     def make_sql_engine(self, echo=False):
         """
@@ -47,7 +55,7 @@ class Access:
                 self.db_password, 
                 self.db_host, 
                 str(self.db_port),
-                self.db_database), echo=echo
+                self.db_table), echo=echo
         )
     
     def query(self, q):
@@ -82,7 +90,7 @@ class Access:
                 from_='+19179822265',
                 to=n)
 
-class PTRUpdater(Access):
+class HousePTRUpdater(Access):
     """
     Tables are:
     - ptr_files
@@ -91,7 +99,7 @@ class PTRUpdater(Access):
     - test_transactions
     """
     def __init__(self, force_env=None):
-        super().__init__(force_env)
+        super().__init__(chamber='house', force_env=force_env)
         self.date_ = dt.strftime(dt.now(), "%Y-%m-%d")
 
     def update_ptrs(self, send_text=True, verify=False, debug=False):

@@ -3,3 +3,4 @@ config.json
 **/.ipynb_checkpoints/
 *.ipynb
 .DS_Store
+poetry_req_export_code
