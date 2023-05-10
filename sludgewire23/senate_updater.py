@@ -177,11 +177,11 @@ class SenatePTRUpdater(Access):
     def filter_new_files(self, search_row_dicts):
         search_row_df = pd.DataFrame(search_row_dicts).drop_duplicates()
         print(f"{len(search_row_df)} senate PTR files found ...")
-        existing_keys = self.read_from_db("select distinct(File_Key) from ptr_files")
-        new_files_df = search_row_df[~search_row_df['File_Key'].isin(existing_keys['File_Key'])]
         if len(new_files_df) > 0:
             print(f"{len(new_files_df)} new senate PTR files found ...")
             print(new_files_df['File_Key'])
+            existing_keys = self.read_from_db("select distinct(File_Key) from ptr_files")
+            new_files_df = search_row_df[~search_row_df['File_Key'].isin(existing_keys['File_Key'])]
         else:
             print("no new senate PTRs!")
         return new_files_df
