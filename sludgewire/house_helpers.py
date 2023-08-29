@@ -7,11 +7,11 @@ import pdfquery
 import pandas as pd
 import regex as re
 from lxml import etree
-from .parse_helpers import (
+from .house_parse_helpers import (
     doc_ender,doc_trigger, table_trigger, entry_trigger, 
     header_check, translate_check, make_ltlh_dict
     )
-from .entry_parsers import process_ptr_entry
+from .house_entry_parsers import process_ptr_entry
 from typing import Union
 
 class congressDoc:

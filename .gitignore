@@ -4,3 +4,7 @@ config.json
 *.ipynb
 .DS_Store
 poetry_req_export_code
+old/
+.pytest_cache/
+.env
+geckodriver.log

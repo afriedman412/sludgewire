@@ -1,94 +1,11 @@
-import os
-import json
 import pandas as pd
 from datetime import datetime as dt
-from sqlalchemy import create_engine, text as sql_text
-from .helpers import get_doc_list, congressDoc, make_state
+from .house_helpers import get_doc_list, congressDoc, make_state
 from urllib.parse import urljoin
-from twilio.rest import Client
 from tqdm import tqdm
-from typing import Literal
+from .access import Access
 
 pd.options.mode.chained_assignment = None
-
-class Access:
-    """
-    Handles credentials and connections.
-    """
-    def __init__(self, chamber=Literal['house', 'senate', 'h', 's'], force_env=None):
-        __location__ = os.path.realpath(
-            os.path.join(os.getcwd(), os.path.dirname(__file__)))
-
-        if any([
-            "HEROKU" in os.environ, force_env
-            ]):
-            for k in [
-                'db_host', 'db_port', 'db_user', 'db_password',
-                'twilio_auth', 'twilio_sid', 'twilio_test_auth', 'twilio_test_sid', 
-                'phone_numbers'
-            ]:
-                setattr(self, k, os.environ[k])
-        
-        else:
-            config_ = json.load(open(os.path.join(__location__,'config.json'), 'rb'))
-            for k in config_:
-                setattr(self, k, config_[k])
-        
-        if chamber.startswith('h'):
-            self.db_table='house_ptr'
-        elif chamber.startswith('s'):
-            self.db_table='senate_ptr'
-        else:
-            raise "bad chamber!"
-
-    def make_sql_engine(self, echo=False):
-        """
-        Note: 
-        - pd.read_sql needs engine.connect()
-        - df.to_sql only needs engine
-
-        """
-        dbstr = """mysql+pymysql://{}:{}@{}:{}/{}"""
-        return create_engine(
-            dbstr.format(
-                self.db_user, 
-                self.db_password, 
-                self.db_host, 
-                str(self.db_port),
-                self.db_table), echo=echo
-        )
-    
-    def query(self, q):
-        engine = self.make_sql_engine()
-        with engine.connect() as conn:
-            conn.execute(sql_text(q))
-        engine.dispose()
-        return
-        
-    def write_to_db(self, df, table, if_exists='append', index=False):
-        engine = self.make_sql_engine()
-        df.to_sql(table, con=engine, if_exists=if_exists, index=index) # to_sql needs a "engine" object
-        engine.dispose()
-        return
-
-    def read_from_db(self, q):
-        engine = self.make_sql_engine()
-        df = pd.read_sql(sql_text(q), engine.connect()) # read_sql needs a "connect" object
-        engine.dispose()
-        return df
-    
-    def send_text(self, payload):
-        client = Client(self.twilio_sid, self.twilio_auth)
-
-        # in case phone numbers is a stringified list...
-        if isinstance(self.phone_numbers, str):
-            self.phone_numbers=eval(self.phone_numbers)
-
-        for n in self.phone_numbers:
-            message = client.messages.create(
-                body=payload,
-                from_='+19179822265',
-                to=n)
 
 class HousePTRUpdater(Access):
     """
