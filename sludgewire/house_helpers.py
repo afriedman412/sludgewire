@@ -7,11 +7,11 @@ import pdfquery
 import pandas as pd
 import regex as re
 from lxml import etree
-from .house_parse_helpers import (
+from .house_parser_helpers import (
     doc_ender,doc_trigger, table_trigger, entry_trigger, 
     header_check, translate_check, make_ltlh_dict
     )
-from .house_entry_parsers import process_ptr_entry
+from .house_parsers import process_ptr_entry
 from typing import Union
 
 class congressDoc:
@@ -81,28 +81,25 @@ class congressDoc:
                         if not header_check(t, self.spacer):
                             self.entry.append(translate_check(t, self.spacer))
     
-    def make_dataframe(self, row: dict) -> pd.DataFrame:
+    def make_dataframe(self) -> pd.DataFrame:
         """
         Makes dataframe from transactions and adds PTR document metadata (from "row").
         """
         df_ = pd.DataFrame([process_ptr_entry(c, self.spacer) for c in self.all_transactions[0]])
-        for k,v in row.to_dict().items():
-            df_[k] = v
-        return df_
-                        
+        return df_ 
 
 def get_entry_data(row) -> tuple:
     output = [t.text.strip() for t in row.find_all('td')]
     output.append(row.find_all('td')[0].a['href'])
     return tuple(output)
 
-def get_doc_list(year: str=None) -> list:
-    if not year:
-        year = dt.now().year
-    r = requests.post(
-        'https://disclosures-clerk.house.gov/PublicDisclosure/FinancialDisclosure/ViewMemberSearchResult',
-        params={'FilingYear':year}
-    )
+def get_doc_list(params=None) -> list:
+    base_url = 'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewMemberSearchResult'
+    if not params:
+        params = {
+            "FilingYear":dt.now().year
+        }
+    r = requests.post(base_url, params=params)
     soup = BeautifulSoup(r.content, 'lxml')
     doc_list = [get_entry_data(row) for row in soup.find_all('tr')[1:]]
     return doc_list
