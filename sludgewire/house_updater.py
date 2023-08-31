@@ -10,11 +10,7 @@ pd.options.mode.chained_assignment = None
 
 class HousePTRUpdater(Access):
     """
-    Tables are:
-    - ptr_files
-    - ptr_transactions
-    - test_files
-    - test_transactions
+
     """
     def __init__(
             self, 

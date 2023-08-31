@@ -24,6 +24,15 @@ class congressDoc:
         return
 
     def make_soup(self, input_: Union[bytes, str]):
+        """
+        Converts either a url (pointing to a .pdf) or the bytes of a .pdf file into BeautifulSoup.
+
+        Input:
+            input_ (bytes or str) - address or data for a .pdf document
+        
+        Output:
+            soup - BeautifulSoup of input_
+        """
         if isinstance(input_, str) and input_.startswith("http"):
             xml = load_xml(input_)
         elif isinstance(input_, bytes):
@@ -89,11 +98,29 @@ class congressDoc:
         return df_ 
 
 def get_entry_data(row) -> tuple:
+    """
+    Extracts and formats data for one row of document search results.
+
+    Input:
+        row - one row of document search results
+
+    Outputs:
+        (tuple) - formatted document data
+    """
     output = [t.text.strip() for t in row.find_all('td')]
     output.append(row.find_all('td')[0].a['href'])
     return tuple(output)
 
 def get_doc_list(params=None) -> list:
+    """
+    Formats document search results.
+
+    Input:
+        params (None) - query params for document search ... only here for testing purposes, default is the entire current year.
+
+    Output:
+        doc_list (list) - list of formatted document search results
+    """
     base_url = 'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewMemberSearchResult'
     if not params:
         params = {
@@ -104,14 +131,22 @@ def get_doc_list(params=None) -> list:
     doc_list = [get_entry_data(row) for row in soup.find_all('tr')[1:]]
     return doc_list
 
-def load_xml(url):
+def load_xml(url: str):
+    """
+    Extracts xml from a url pointing to a .pdf file.
+
+    Input:
+        url (str) - url pointing to a document in .pdf format
+
+    Output:
+        xml (str?) - extracted xml of .pdf file
+    """
     http = urllib3.PoolManager()
     temp = io.BytesIO()
     temp.write(http.request("GET", url).data)
     pq = pdfquery.PDFQuery(temp)
     pq.load()
     xml = etree.tostring(pq.tree)
-
     return xml
 
 def make_state(jurisdiction):
