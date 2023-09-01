@@ -1,6 +1,8 @@
 import pytest
 from sludgewire.house_updater import HousePTRUpdater
 from sludgewire.house_helpers import get_doc_list
+import pandas as pd
+import os
 
 @pytest.fixture(scope="module")
 def hpu():
@@ -18,3 +20,8 @@ def test_hpu(hpu):
 
     test_row_df = hpu.parse_one_url('public_disc/ptr-pdfs/2023/20022986.pdf')
     assert test_row_df['asset'][1].split()[0] == 'southstate', "Parser error"
+
+    new_ptr_docs_df = hpu.get_new_docs(debug=True)
+    existing_files = hpu.get_existing_file_names(year=2021)
+    new_ptr_docs_df = new_ptr_docs_df.query("file_name not in @existing_files")
+    assert len(new_ptr_docs_df) == 0

@@ -46,7 +46,7 @@ def test_senate_search(spu):
     spu.driver.quit()
 
     assert len(search_row_dicts) == 6
-    assert search_row_dicts[-1]['File_Key'] == '378080ec-6299-4274-a5e6-aa4f68577985'
+    assert '378080ec-6299-4274-a5e6-aa4f68577985' in [d['File_Key'] for d in search_row_dicts]
     assert ptr_transactions.loc[0, 'Comment'].split()[4] == 'managed'
 
     

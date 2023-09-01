@@ -27,12 +27,14 @@ class SenatePTRUpdater(Access):
     def full_ptr_updater(self):
         new_ptr_files_df = self.get_new_file_list()
         new_ptr_transactions_df = self.get_new_ptr_transactions(new_ptr_files_df)
-        
-        for data, db in zip(
-            [new_ptr_files_df, new_ptr_transactions_df],
-            ['ptr_files', 'transactions']
-            ):
-            self.update_db(data, db)
+        if len(new_ptr_files_df) > 0:
+            
+            for data, db in zip(
+                [new_ptr_files_df, new_ptr_transactions_df],
+                ['ptr_files', 'transactions']
+                ):
+                self.update_db(data, db)
+            self.text_new_files(new_ptr_files_df)
 
         self.driver.quit()
         return
@@ -188,7 +190,7 @@ class SenatePTRUpdater(Access):
         self.write_to_db(data, db)
         return
     
-    def text_new_files(self, new_ptr_files_df):
+    def text_new_files(self, new_ptr_files_df: pd.DataFrame):
         file_data = "\n".join(
             [
                 " / ".join(v) for v in new_ptr_files_df[

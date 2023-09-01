@@ -21,7 +21,7 @@ class HousePTRUpdater(Access):
             self.start_date = dt.strftime(dt.now(), "%Y-%m-%d")
             self.year = dt.now().year
 
-    def update_ptrs(self, verify=False):
+    def update_ptrs(self):
         """
         Full process of checking for new PTRs, extracting transactions and uploading both to database.
 
@@ -46,7 +46,7 @@ class HousePTRUpdater(Access):
 
             # write new files to table
             # (do this last so if something goes wrong with writing the transactions it can easily be re-run)
-            self.write_to_db(new_ptr_docs_df, "ptr_files")
+            self.write_to_db(new_ptr_docs_df, "doc_table")
 
             # send text
             print("sending text...")
@@ -70,13 +70,17 @@ class HousePTRUpdater(Access):
         print(f"{len(new_ptr_docs_df)} new PTRs found")
         return new_ptr_docs_df
 
-    def get_new_docs(self):
+    def get_new_docs(self, debug: bool=False):
         """
         Only PTRs!! Adjust later.
         """
         print("finding new PTRs...")
+        if debug:
+            doc_list = get_doc_list(params={"FilingYear":2021})
+        else:
+            doc_list = get_doc_list()
         ptr_docs_df = pd.DataFrame(
-            get_doc_list(),
+            doc_list,
             columns=['rep_name', 'jurisdiction', 'year', 'doc_type', 'url']
         ).query("doc_type.str.contains('PTR')")
         ptr_docs_df['file_name'] = ptr_docs_df['url'].map(os.path.basename)
