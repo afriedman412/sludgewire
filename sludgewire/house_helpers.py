@@ -7,11 +7,11 @@ import pdfquery
 import pandas as pd
 import regex as re
 from lxml import etree
-from .parse_helpers import (
+from .house_parser_helpers import (
     doc_ender,doc_trigger, table_trigger, entry_trigger, 
     header_check, translate_check, make_ltlh_dict
     )
-from .entry_parsers import process_ptr_entry
+from .house_parsers import process_ptr_entry
 from typing import Union
 
 class congressDoc:
@@ -24,6 +24,15 @@ class congressDoc:
         return
 
     def make_soup(self, input_: Union[bytes, str]):
+        """
+        Converts either a url (pointing to a .pdf) or the bytes of a .pdf file into BeautifulSoup.
+
+        Input:
+            input_ (bytes or str) - address or data for a .pdf document
+        
+        Output:
+            soup - BeautifulSoup of input_
+        """
         if isinstance(input_, str) and input_.startswith("http"):
             xml = load_xml(input_)
         elif isinstance(input_, bytes):
@@ -81,40 +90,63 @@ class congressDoc:
                         if not header_check(t, self.spacer):
                             self.entry.append(translate_check(t, self.spacer))
     
-    def make_dataframe(self, row: dict) -> pd.DataFrame:
+    def make_dataframe(self) -> pd.DataFrame:
         """
         Makes dataframe from transactions and adds PTR document metadata (from "row").
         """
         df_ = pd.DataFrame([process_ptr_entry(c, self.spacer) for c in self.all_transactions[0]])
-        for k,v in row.to_dict().items():
-            df_[k] = v
-        return df_
-                        
+        return df_ 
 
 def get_entry_data(row) -> tuple:
+    """
+    Extracts and formats data for one row of document search results.
+
+    Input:
+        row - one row of document search results
+
+    Outputs:
+        (tuple) - formatted document data
+    """
     output = [t.text.strip() for t in row.find_all('td')]
     output.append(row.find_all('td')[0].a['href'])
     return tuple(output)
 
-def get_doc_list(year: str=None) -> list:
-    if not year:
-        year = dt.now().year
-    r = requests.post(
-        'https://disclosures-clerk.house.gov/PublicDisclosure/FinancialDisclosure/ViewMemberSearchResult',
-        params={'FilingYear':year}
-    )
+def get_doc_list(params=None) -> list:
+    """
+    Formats document search results.
+
+    Input:
+        params (None) - query params for document search ... only here for testing purposes, default is the entire current year.
+
+    Output:
+        doc_list (list) - list of formatted document search results
+    """
+    base_url = 'https://disclosures-clerk.house.gov/FinancialDisclosure/ViewMemberSearchResult'
+    if not params:
+        params = {
+            "FilingYear":dt.now().year
+        }
+    r = requests.post(base_url, params=params)
     soup = BeautifulSoup(r.content, 'lxml')
     doc_list = [get_entry_data(row) for row in soup.find_all('tr')[1:]]
     return doc_list
 
-def load_xml(url):
+def load_xml(url: str):
+    """
+    Extracts xml from a url pointing to a .pdf file.
+
+    Input:
+        url (str) - url pointing to a document in .pdf format
+
+    Output:
+        xml (str?) - extracted xml of .pdf file
+    """
     http = urllib3.PoolManager()
     temp = io.BytesIO()
     temp.write(http.request("GET", url).data)
     pq = pdfquery.PDFQuery(temp)
     pq.load()
     xml = etree.tostring(pq.tree)
-
     return xml
 
 def make_state(jurisdiction):

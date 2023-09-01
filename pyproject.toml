@@ -3,7 +3,6 @@ name = "sludgewire"
 version = "0.1.0"
 description = "Updates congressional financial disclosure data."
 authors = ["Andrew Friedman"]
-readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -16,6 +15,8 @@ sqlalchemy = "^2.0.9"
 regex = "^2023.3.23"
 pymysql = "^1.0.3"
 selenium = "^4.8.3"
+pytest = "^7.4.0"
+python-dotenv = "^1.0.0"
 
 
 [build-system]
