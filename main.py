@@ -6,5 +6,5 @@ if __name__=="__main__":
     p.update_ptrs()
 
     s = SenatePTRUpdater()
-    s.full_search()
+    s.full_ptr_updater()
 
