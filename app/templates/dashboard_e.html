@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Schedule E Filings Today{% endblock %}
+
+{% block content %}
+<h2>Schedule E events filed today (ET)</h2>
+
+<div class="muted">
+    Day window: {{ day_et }}
+</div>
+
+<p>
+    <a href="/api/e/today">JSON API</a>
+</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Filed (UTC)</th>
+            <th>Filing ID</th>
+            <th>Filer</th>
+            <th>S/O</th>
+            <th>Amount</th>
+            <th>Exp. date</th>
+            <th>Candidate</th>
+            <th>Raw</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if rows %}
+        {% for r in rows %}
+        <tr>
+            <td>{{ r.filed_at_utc }}</td>
+            <td>{{ r.filing_id }}</td>
+            <td>{{ r.committee_name or r.committee_id or r.filer_id }}</td>
+            <td>{{ r.support_oppose }}</td>
+            <td class="money">
+                {% if r.amount is not none %}
+                ${{ "{:,.2f}".format(r.amount) }}
+                {% endif %}
+            </td>
+            <td>{{ r.expenditure_date }}</td>
+            <td>{{ r.candidate_name }}</td>
+            <td>
+                <a href="{{ r.fec_url }}" target="_blank" rel="noreferrer">.fec</a>
+            </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="8">No Schedule E events found.</td>
+        </tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

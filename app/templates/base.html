@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>{% block title %}FEC Monitor{% endblock %}</title>
+        <style>
+      body {
+        font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+        margin: 24px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+      }
+      th {
+        background: #f6f6f6;
+        text-align: left;
+      }
+      .muted {
+        color: #666;
+      }
+      .money {
+        text-align: right;
+        white-space: nowrap;
+      }
+      a {
+        color: #0366d6;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+        {% block head %}{% endblock %}
+    </head>
+    <body>
+        <h1>FEC Monitor</h1>
+        <nav style="margin-bottom: 16px;">
+            <a href="/dashboard/3x">3X Dashboard</a> |
+            <a href="/dashboard/e">Schedule E Dashboard</a>
+        </nav>
+
+        {% block content %}{% endblock %}
+    </body>
+</html>

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}F3X Filings Today{% endblock %}
+
+{% block content %}
+<h2>
+    F3X filings today (ET) with total receipts ≥ {{ threshold | round | int | string | replace(",", "") | int |
+    format_currency }}
+</h2>
+
+<div class="muted">
+    Day window: {{ day_et }}
+</div>
+
+<p>
+    <a href="/api/3x/today?threshold={{ threshold }}">JSON API</a>
+</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Filed (UTC)</th>
+            <th>Committee ID</th>
+            <th>Committee Name</th>
+            <th>Form</th>
+            <th>Report</th>
+            <th>Coverage</th>
+            <th>Total receipts</th>
+            <th>Raw</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if rows %}
+        {% for r in rows %}
+        <tr>
+            <td>{{ r.filed_at_utc }}</td>
+            <td>{{ r.committee_id }}</td>
+            <td>{{ r.committee_name or "" }}</td>
+            <td>{{ r.form_type }}</td>
+            <td>{{ r.report_type }}</td>
+            <td>{{ r.coverage_from }} → {{ r.coverage_through }}</td>
+            <td class="money">${{ "{:,.2f}".format(r.total_receipts) }}</td>
+            <td>
+                <a href="{{ r.fec_url }}" target="_blank" rel="noreferrer">.fec</a>
+            </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="8">No filings found.</td>
+        </tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

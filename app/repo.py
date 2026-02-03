@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
+
+from sqlalchemy import select
+from sqlmodel import Session
+
+from .schemas import SeenFiling, FilingF3X, IEScheduleE
+
+
+def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
+    """
+    Returns True if we successfully claimed this filing_id (first time seen).
+    """
+    existing = session.get(SeenFiling, filing_id)
+    if existing:
+        return False
+
+    session.add(SeenFiling(filing_id=filing_id, source_feed=source_feed))
+    # flush to surface unique/PK issues immediately
+    session.flush()
+    return True
+
+
+def upsert_f3x(
+    session: Session,
+    *,
+    filing_id: int,
+    committee_id: str,
+    committee_name: Optional[str] = None,
+    form_type: Optional[str],
+    report_type: Optional[str],
+    coverage_from,
+    coverage_through,
+    filed_at_utc,
+    fec_url: str,
+    total_receipts: Optional[float],
+    threshold_flag: bool,
+    raw_meta: Optional[Dict[str, Any]],
+) -> None:
+    row = session.get(FilingF3X, filing_id)
+    now = datetime.now(timezone.utc)
+
+    if row is None:
+        session.add(
+            FilingF3X(
+                filing_id=filing_id,
+                committee_id=committee_id,
+                committee_name=committee_name,
+                form_type=form_type,
+                report_type=report_type,
+                coverage_from=coverage_from,
+                coverage_through=coverage_through,
+                filed_at_utc=filed_at_utc,
+                fec_url=fec_url,
+                total_receipts=total_receipts,
+                threshold_flag=threshold_flag,
+                raw_meta=raw_meta,
+                updated_at_utc=now,
+            )
+        )
+    else:
+        row.committee_id = committee_id
+        row.committee_name = committee_name
+        row.form_type = form_type
+        row.report_type = report_type
+        row.coverage_from = coverage_from
+        row.coverage_through = coverage_through
+        row.filed_at_utc = filed_at_utc
+        row.fec_url = fec_url
+        row.total_receipts = total_receipts
+        row.threshold_flag = threshold_flag
+        if raw_meta is not None:
+            row.raw_meta = raw_meta
+        row.updated_at_utc = now
+        session.add(row)
+
+    session.flush()
+
+
+def insert_ie_event(session: Session, event: IEScheduleE) -> bool:
+    """
+    Insert-only dedupe by primary key event_id.
+    Returns True if inserted, False if already existed.
+    """
+    existing = session.get(IEScheduleE, event.event_id)
+    if existing:
+        return False
+    session.add(event)
+    session.flush()
+    return True
