@@ -362,7 +362,7 @@ def _trigger_backfill_async(target_date: date, filing_type: str):
             else:
                 backfill_date_e(session, target_date)
 
-    thread = threading.Thread(target=run, daemon=True)
+    thread = threading.Thread(target=run, daemon=False)
     thread.start()
 
 

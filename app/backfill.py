@@ -1,7 +1,7 @@
 """FEC API backfill logic for fetching historical data by date."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
 import requests
@@ -45,6 +45,12 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
     # Skip if already completed
     if job.status == "completed":
         return job
+
+    # Restart stale "running" jobs (stuck for > 10 min)
+    if job.status == "running" and job.started_at:
+        stale_threshold = datetime.now(timezone.utc) - timedelta(minutes=10)
+        if job.started_at < stale_threshold:
+            job.status = "pending"  # Reset to retry
 
     # Mark as running
     job.status = "running"
@@ -193,6 +199,12 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
 
     if job.status == "completed":
         return job
+
+    # Restart stale "running" jobs (stuck for > 10 min)
+    if job.status == "running" and job.started_at:
+        stale_threshold = datetime.now(timezone.utc) - timedelta(minutes=10)
+        if job.started_at < stale_threshold:
+            job.status = "pending"  # Reset to retry
 
     job.status = "running"
     job.started_at = datetime.now(timezone.utc)
