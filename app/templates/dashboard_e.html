@@ -1,12 +1,46 @@
 {% extends "base.html" %}
 
-{% block title %}Schedule E Filings Today{% endblock %}
+{% block title %}Schedule E Filings - {{ day_et }}{% endblock %}
+
+{% block head %}
+<style>
+    .date-nav {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    .date-nav a {
+        padding: 6px 12px;
+        background: #f6f6f6;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .date-nav a:hover {
+        background: #eee;
+        text-decoration: none;
+    }
+    .date-display {
+        font-weight: bold;
+        font-size: 1.1em;
+    }
+    .support { color: #28a745; font-weight: bold; }
+    .oppose { color: #dc3545; font-weight: bold; }
+    td.purpose { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+{% endblock %}
 
 {% block content %}
-<h2>Schedule E events filed today (ET)</h2>
+<h2>Schedule E Events</h2>
 
-<div class="muted">
-    Day window: {{ day_et }}
+<div class="date-nav">
+    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/e">&larr; Previous Day</a>
+    <span class="date-display">{{ day_et.strftime('%B %d, %Y') }}</span>
+    {% if next_date <= today %}
+    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/e">Next Day &rarr;</a>
+    {% else %}
+    <span class="muted">Next Day &rarr;</span>
+    {% endif %}
 </div>
 
 <p>
@@ -16,13 +50,14 @@
 <table>
     <thead>
         <tr>
-            <th>Filed (UTC)</th>
-            <th>Filing ID</th>
-            <th>Filer</th>
-            <th>S/O</th>
-            <th>Amount</th>
-            <th>Exp. date</th>
+            <th>Spender</th>
+            <th>Spender ID</th>
             <th>Candidate</th>
+            <th>S/O</th>
+            <th>Purpose</th>
+            <th>Payee</th>
+            <th>Exp. Date</th>
+            <th>Amount</th>
             <th>Raw</th>
         </tr>
     </thead>
@@ -30,17 +65,20 @@
         {% if rows %}
         {% for r in rows %}
         <tr>
-            <td>{{ r.filed_at_utc }}</td>
-            <td>{{ r.filing_id }}</td>
-            <td>{{ r.committee_name or r.committee_id or r.filer_id }}</td>
-            <td>{{ r.support_oppose }}</td>
+            <td>{{ r.committee_name or "" }}</td>
+            <td>{{ r.committee_id or r.filer_id or "" }}</td>
+            <td>{{ r.candidate_name or "" }}</td>
+            <td class="{{ 'support' if r.support_oppose == 'S' else 'oppose' if r.support_oppose == 'O' else '' }}">
+                {{ r.support_oppose or "" }}
+            </td>
+            <td class="purpose" title="{{ r.purpose or '' }}">{{ r.purpose or "" }}</td>
+            <td>{{ r.payee_name or "" }}</td>
+            <td>{{ r.expenditure_date or "" }}</td>
             <td class="money">
                 {% if r.amount is not none %}
                 ${{ "{:,.2f}".format(r.amount) }}
                 {% endif %}
             </td>
-            <td>{{ r.expenditure_date }}</td>
-            <td>{{ r.candidate_name }}</td>
             <td>
                 <a href="{{ r.fec_url }}" target="_blank" rel="noreferrer">.fec</a>
             </td>
@@ -48,7 +86,7 @@
         {% endfor %}
         {% else %}
         <tr>
-            <td colspan="8">No Schedule E events found.</td>
+            <td colspan="9">No Schedule E events found.</td>
         </tr>
         {% endif %}
     </tbody>

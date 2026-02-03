@@ -1,15 +1,45 @@
 {% extends "base.html" %}
 
-{% block title %}F3X Filings Today{% endblock %}
+{% block title %}F3X Filings - {{ day_et }}{% endblock %}
+
+{% block head %}
+<style>
+    .date-nav {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    .date-nav a {
+        padding: 6px 12px;
+        background: #f6f6f6;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .date-nav a:hover {
+        background: #eee;
+        text-decoration: none;
+    }
+    .date-display {
+        font-weight: bold;
+        font-size: 1.1em;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
 <h2>
-    F3X filings today (ET) with total receipts ≥ {{ threshold | round | int | string | replace(",", "") | int |
-    format_currency }}
+    F3X Filings (≥{{ threshold | round | int | string | replace(",", "") | int | format_currency }})
 </h2>
 
-<div class="muted">
-    Day window: {{ day_et }}
+<div class="date-nav">
+    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/3x">&larr; Previous Day</a>
+    <span class="date-display">{{ day_et.strftime('%B %d, %Y') }}</span>
+    {% if next_date <= today %}
+    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/3x">Next Day &rarr;</a>
+    {% else %}
+    <span class="muted">Next Day &rarr;</span>
+    {% endif %}
 </div>
 
 <p>

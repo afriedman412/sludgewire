@@ -65,9 +65,89 @@ def extract_schedule_e_best_effort(fec_text: str) -> Iterable[Tuple[str, dict]]:
     """
     Yields (raw_line, extracted_fields_dict).
 
-    IMPORTANT: Schedule E layouts vary by form/version. We store raw_line always.
-    The extracted fields here are best-effort; refine with real samples later.
+    Uses fecfile parsed output for structured field extraction.
+    Falls back to raw line parsing if fecfile fails.
     """
+    # First, try to get structured data from fecfile
+    try:
+        parsed = fecfile.loads(fec_text)
+        filing = parsed.get("filing", {})
+        itemizations = parsed.get("itemizations", {})
+
+        # fecfile uses "Schedule E" as the key
+        se_items = itemizations.get(
+            "Schedule E", []) or itemizations.get("SE", [])
+
+        for item in se_items:
+            # Build raw_line from item for deduplication
+            raw_line = "|".join(str(v) for v in item.values() if v)
+
+            # Extract expenditure date (dissemination_date or disbursement_date)
+            expenditure_date = None
+            for date_field in ("dissemination_date", "disbursement_date", "expenditure_date"):
+                val = item.get(date_field)
+                if val:
+                    if isinstance(val, datetime):
+                        expenditure_date = val.date()
+                    elif isinstance(val, date):
+                        expenditure_date = val
+                    elif isinstance(val, str):
+                        expenditure_date = _parse_date_flexible(val)
+                    if expenditure_date:
+                        break
+
+            # Extract amount
+            amount = None
+            amount_val = item.get("expenditure_amount")
+            if amount_val is not None:
+                try:
+                    amount = float(amount_val)
+                except (TypeError, ValueError):
+                    pass
+
+            # Build candidate name
+            candidate_parts = [
+                item.get("candidate_first_name", ""),
+                item.get("candidate_middle_name", ""),
+                item.get("candidate_last_name", ""),
+            ]
+            candidate_name = " ".join(p.strip()
+                                      for p in candidate_parts if p and p.strip())
+
+            # Build payee name
+            payee_org = item.get("payee_organization_name", "")
+            if payee_org and payee_org.strip():
+                payee_name = payee_org.strip()
+            else:
+                payee_parts = [
+                    item.get("payee_first_name", ""),
+                    item.get("payee_last_name", ""),
+                ]
+                payee_name = " ".join(p.strip()
+                                      for p in payee_parts if p and p.strip())
+
+            yield raw_line, {
+                "expenditure_date": expenditure_date,
+                "amount": amount,
+                "support_oppose": item.get("support_oppose_code"),
+                "candidate_id": item.get("candidate_id_number"),
+                "candidate_name": candidate_name or None,
+                "candidate_office": item.get("candidate_office"),
+                "candidate_state": item.get("candidate_state"),
+                "candidate_district": item.get("candidate_district"),
+                "election_code": item.get("election_code"),
+                "purpose": item.get("expenditure_purpose_descrip"),
+                "payee_name": payee_name or None,
+            }
+
+        # If we got items from fecfile, we're done
+        if se_items:
+            return
+
+    except Exception:
+        pass  # Fall back to raw parsing
+
+    # Fallback: raw line parsing for SE records
     for row in iter_pipe_rows(fec_text):
         rec = row[0]
         if not rec.startswith("SE"):
@@ -75,7 +155,7 @@ def extract_schedule_e_best_effort(fec_text: str) -> Iterable[Tuple[str, dict]]:
 
         raw_line = "|".join(row)
 
-        # Heuristic extraction: amount/date/support-oppose (minimal)
+        # Heuristic extraction
         amount = None
         expenditure_date = None
         support_oppose = None
@@ -104,7 +184,6 @@ def extract_schedule_e_best_effort(fec_text: str) -> Iterable[Tuple[str, dict]]:
             "expenditure_date": expenditure_date,
             "amount": amount,
             "support_oppose": support_oppose,
-            # placeholders (fill later once you map real SE columns)
             "candidate_id": None,
             "candidate_name": None,
             "candidate_office": None,
@@ -114,6 +193,24 @@ def extract_schedule_e_best_effort(fec_text: str) -> Iterable[Tuple[str, dict]]:
             "purpose": None,
             "payee_name": None,
         }
+
+
+def _parse_date_flexible(s: str) -> Optional[date]:
+    """Parse date from various formats."""
+    if not s:
+        return None
+    s = s.strip()
+    # Try ISO format first (from fecfile datetime objects converted to string)
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S%z"):
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    return None
 
 
 def _parse_mmddyyyy(s: str) -> Optional[date]:

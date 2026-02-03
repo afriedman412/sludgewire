@@ -1,19 +1,21 @@
 # app/api.py
 from __future__ import annotations
 
-from datetime import datetime, date, time, timezone
+from datetime import datetime, date, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Any, Dict
 from pathlib import Path
+import threading
 
-from fastapi import FastAPI, Depends, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Depends, Query, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select, col
 
 from .settings import load_settings
 from .db import make_engine, init_db
-from .schemas import FilingF3X, IEScheduleE
+from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob
+from .auth import verify_admin
 
 # --- App + DB bootstrap ---
 settings = load_settings()
@@ -83,6 +85,7 @@ def dashboard_3x(
     limit: int = Query(default=200, ge=1, le=2000),
 ):
     start_utc, end_utc = et_today_utc_bounds()
+    today = start_utc.astimezone(ET).date()
 
     stmt = (
         select(FilingF3X)
@@ -101,7 +104,10 @@ def dashboard_3x(
             "request": request,
             "rows": rows,
             "threshold": threshold,
-            "day_et": start_utc.astimezone(ET).date(),
+            "day_et": today,
+            "prev_date": today - timedelta(days=1),
+            "next_date": today + timedelta(days=1),
+            "today": today,
             "api_url": f"/api/3x/today?threshold={threshold}&limit={limit}",
         },
     )
@@ -118,6 +124,7 @@ def dashboard_e(
     If you want "filings" instead, we can switch this to a DISTINCT filing_id query.
     """
     start_utc, end_utc = et_today_utc_bounds()
+    today = start_utc.astimezone(ET).date()
 
     stmt = (
         select(IEScheduleE)
@@ -133,7 +140,10 @@ def dashboard_e(
         {
             "request": request,
             "rows": rows,
-            "day_et": start_utc.astimezone(ET).date(),
+            "day_et": today,
+            "prev_date": today - timedelta(days=1),
+            "next_date": today + timedelta(days=1),
+            "today": today,
             "api_url": f"/api/e/today?limit={limit}",
         },
     )
@@ -250,3 +260,340 @@ def api_e_query(
     stmt = stmt.order_by(IEScheduleE.filed_at_utc.desc()).limit(limit)
     rows = session.exec(stmt).all()
     return {"count": len(rows), "results": [_model_dump(r) for r in rows]}
+
+
+# -------------------------
+# Config Endpoints (Protected)
+# -------------------------
+
+@app.get("/config", response_class=HTMLResponse)
+def config_page(
+    request: Request,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    message: Optional[str] = Query(default=None),
+    message_type: Optional[str] = Query(default=None),
+):
+    """Password-protected config page for managing email recipients."""
+    recipients = session.exec(
+        select(EmailRecipient).order_by(EmailRecipient.created_at.desc())
+    ).all()
+
+    return templates.TemplateResponse(
+        "config.html",
+        {
+            "request": request,
+            "recipients": recipients,
+            "message": message,
+            "message_type": message_type,
+        },
+    )
+
+
+@app.post("/config/recipients")
+def add_recipient(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    email: str = Form(...),
+):
+    """Add a new email recipient."""
+    existing = session.exec(
+        select(EmailRecipient).where(EmailRecipient.email == email)
+    ).first()
+
+    if existing:
+        return RedirectResponse(
+            url="/config?message=Email already exists&message_type=error",
+            status_code=303,
+        )
+
+    recipient = EmailRecipient(email=email, active=True)
+    session.add(recipient)
+    session.commit()
+
+    return RedirectResponse(
+        url="/config?message=Recipient added&message_type=success",
+        status_code=303,
+    )
+
+
+@app.post("/config/recipients/{recipient_id}/delete")
+def delete_recipient(
+    recipient_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+):
+    """Remove an email recipient."""
+    recipient = session.get(EmailRecipient, recipient_id)
+
+    if recipient:
+        session.delete(recipient)
+        session.commit()
+        return RedirectResponse(
+            url="/config?message=Recipient removed&message_type=success",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url="/config?message=Recipient not found&message_type=error",
+        status_code=303,
+    )
+
+
+# -------------------------
+# Date-based Dashboards with Backfill
+# -------------------------
+
+def _date_utc_bounds(target_date: date) -> tuple[datetime, datetime]:
+    """Return [start_utc, end_utc) for a specific date in ET."""
+    start_et = datetime.combine(target_date, time(0, 0, 0), tzinfo=ET)
+    end_et = datetime.combine(target_date + timedelta(days=1), time(0, 0, 0), tzinfo=ET)
+    return start_et.astimezone(timezone.utc), end_et.astimezone(timezone.utc)
+
+
+def _trigger_backfill_async(target_date: date, filing_type: str):
+    """Trigger backfill in background thread."""
+    from .backfill import backfill_date_f3x, backfill_date_e
+
+    def run():
+        with Session(engine) as session:
+            if filing_type == "3x":
+                backfill_date_f3x(session, target_date)
+            else:
+                backfill_date_e(session, target_date)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+
+@app.get("/{year:int}/{month:int}/{day:int}/3x", response_class=HTMLResponse)
+def dashboard_date_3x(
+    request: Request,
+    year: int,
+    month: int,
+    day: int,
+    session: Session = Depends(get_session),
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Date-based F3X dashboard with on-demand backfill."""
+    from .backfill import get_backfill_status, get_or_create_backfill_job
+
+    try:
+        target_date = date(year, month, day)
+    except ValueError:
+        return HTMLResponse("Invalid date", status_code=400)
+
+    today = datetime.now(timezone.utc).astimezone(ET).date()
+
+    # Check if we need to trigger backfill
+    backfill_job = get_backfill_status(session, target_date, "3x")
+    if backfill_job is None and target_date < today:
+        # Create job and trigger backfill
+        backfill_job = get_or_create_backfill_job(session, target_date, "3x")
+        _trigger_backfill_async(target_date, "3x")
+        session.refresh(backfill_job)
+
+    # Query filings for this date - always filter by receipts threshold
+    threshold = settings.receipts_threshold
+    start_utc, end_utc = _date_utc_bounds(target_date)
+    stmt = (
+        select(FilingF3X)
+        .where(FilingF3X.filed_at_utc >= start_utc)
+        .where(FilingF3X.filed_at_utc < end_utc)
+        .where(FilingF3X.total_receipts != None)  # noqa: E711
+        .where(FilingF3X.total_receipts >= threshold)
+        .order_by(FilingF3X.filed_at_utc.desc())
+        .limit(limit)
+    )
+    rows = session.exec(stmt).all()
+
+    return templates.TemplateResponse(
+        "dashboard_date.html",
+        {
+            "request": request,
+            "rows": rows,
+            "target_date": target_date,
+            "prev_date": target_date - timedelta(days=1),
+            "next_date": target_date + timedelta(days=1),
+            "today": today,
+            "filing_type": "3x",
+            "filing_type_label": f"F3X Filings (≥${threshold:,.0f})",
+            "backfill_job": backfill_job,
+        },
+    )
+
+
+@app.get("/{year:int}/{month:int}/{day:int}/e", response_class=HTMLResponse)
+def dashboard_date_e(
+    request: Request,
+    year: int,
+    month: int,
+    day: int,
+    session: Session = Depends(get_session),
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Date-based Schedule E dashboard with on-demand backfill."""
+    from .backfill import get_backfill_status, get_or_create_backfill_job
+
+    try:
+        target_date = date(year, month, day)
+    except ValueError:
+        return HTMLResponse("Invalid date", status_code=400)
+
+    today = datetime.now(timezone.utc).astimezone(ET).date()
+
+    # Check if we need to trigger backfill
+    backfill_job = get_backfill_status(session, target_date, "e")
+    if backfill_job is None and target_date < today:
+        backfill_job = get_or_create_backfill_job(session, target_date, "e")
+        _trigger_backfill_async(target_date, "e")
+        session.refresh(backfill_job)
+
+    # Query events for this date
+    start_utc, end_utc = _date_utc_bounds(target_date)
+    stmt = (
+        select(IEScheduleE)
+        .where(IEScheduleE.filed_at_utc >= start_utc)
+        .where(IEScheduleE.filed_at_utc < end_utc)
+        .order_by(IEScheduleE.filed_at_utc.desc())
+        .limit(limit)
+    )
+    rows = session.exec(stmt).all()
+
+    return templates.TemplateResponse(
+        "dashboard_date.html",
+        {
+            "request": request,
+            "rows": rows,
+            "target_date": target_date,
+            "prev_date": target_date - timedelta(days=1),
+            "next_date": target_date + timedelta(days=1),
+            "today": today,
+            "filing_type": "e",
+            "filing_type_label": "Schedule E Events",
+            "backfill_job": backfill_job,
+        },
+    )
+
+
+@app.get("/api/backfill/status/{year:int}/{month:int}/{day:int}/{filing_type}")
+def api_backfill_status(
+    year: int,
+    month: int,
+    day: int,
+    filing_type: str,
+    session: Session = Depends(get_session),
+):
+    """Get backfill status for polling."""
+    from .backfill import get_backfill_status
+
+    if filing_type not in ("3x", "e"):
+        return {"error": "Invalid filing_type"}, 400
+
+    try:
+        target_date = date(year, month, day)
+    except ValueError:
+        return {"error": "Invalid date"}, 400
+
+    job = get_backfill_status(session, target_date, filing_type)
+    if job is None:
+        return {"status": "not_started"}
+
+    return {
+        "status": job.status,
+        "filings_found": job.filings_found,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "error_message": job.error_message,
+    }
+
+
+# -------------------------
+# Cron Endpoint
+# -------------------------
+
+@app.get("/api/cron/check-new")
+def cron_check_new(session: Session = Depends(get_session)):
+    """Cron endpoint to check for new filings and send email alerts.
+
+    This endpoint is designed to be called by a scheduled task (e.g., Cloud Scheduler).
+    It runs the ingestion process and sends email alerts if new filings are found.
+    """
+    from .ingest_f3x import run_f3x
+    from .ingest_ie import run_ie_schedule_e
+    from .email_service import send_filing_alert
+
+    results = {
+        "f3x_new": 0,
+        "ie_filings_new": 0,
+        "ie_events_new": 0,
+        "email_sent": False,
+    }
+
+    # Run F3X ingestion
+    try:
+        f3x_count = run_f3x(
+            session,
+            feed_url=settings.f3x_feed,
+            receipts_threshold=settings.receipts_threshold,
+        )
+        results["f3x_new"] = f3x_count
+    except Exception as e:
+        results["f3x_error"] = str(e)
+
+    # Run IE Schedule E ingestion
+    try:
+        ie_filings, ie_events = run_ie_schedule_e(
+            session,
+            feed_urls=settings.ie_feeds,
+        )
+        results["ie_filings_new"] = ie_filings
+        results["ie_events_new"] = ie_events
+    except Exception as e:
+        results["ie_error"] = str(e)
+
+    # Send email alerts if new filings were found
+    if results["f3x_new"] > 0 or results["ie_events_new"] > 0:
+        # Get recent filings for the email
+        start_utc, end_utc = et_today_utc_bounds()
+
+        if results["f3x_new"] > 0:
+            stmt = (
+                select(FilingF3X)
+                .where(FilingF3X.filed_at_utc >= start_utc)
+                .where(FilingF3X.filed_at_utc < end_utc)
+                .where(FilingF3X.total_receipts >= settings.receipts_threshold)
+                .order_by(FilingF3X.filed_at_utc.desc())
+                .limit(50)
+            )
+            f3x_filings = session.exec(stmt).all()
+            if f3x_filings:
+                filings_data = [_model_dump(f) for f in f3x_filings]
+                send_filing_alert(session, "3x", filings_data)
+                results["email_sent"] = True
+
+        if results["ie_events_new"] > 0:
+            stmt = (
+                select(IEScheduleE)
+                .where(IEScheduleE.filed_at_utc >= start_utc)
+                .where(IEScheduleE.filed_at_utc < end_utc)
+                .order_by(IEScheduleE.filed_at_utc.desc())
+                .limit(50)
+            )
+            ie_events = session.exec(stmt).all()
+            if ie_events:
+                events_data = [_model_dump(e) for e in ie_events]
+                send_filing_alert(session, "e", events_data)
+                results["email_sent"] = True
+
+    return results
+
+
+# -------------------------
+# Root Redirect
+# -------------------------
+
+@app.get("/")
+def root_redirect():
+    """Redirect root to the main dashboard."""
+    return RedirectResponse(url="/dashboard/3x", status_code=302)

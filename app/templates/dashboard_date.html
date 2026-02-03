@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}{{ filing_type_label }} - {{ target_date }}{% endblock %}
+
+{% block head %}
+<style>
+    .date-nav {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    .date-nav a {
+        padding: 6px 12px;
+        background: #f6f6f6;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .date-nav a:hover {
+        background: #eee;
+        text-decoration: none;
+    }
+    .date-display {
+        font-weight: bold;
+        font-size: 1.1em;
+    }
+    .backfill-status {
+        padding: 12px;
+        border-radius: 4px;
+        margin-bottom: 16px;
+    }
+    .backfill-status.pending {
+        background: #fff3cd;
+        color: #856404;
+    }
+    .backfill-status.running {
+        background: #cce5ff;
+        color: #004085;
+    }
+    .backfill-status.completed {
+        background: #d4edda;
+        color: #155724;
+    }
+    .backfill-status.failed {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    .spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #ccc;
+        border-top-color: #333;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+</style>
+{% if backfill_job and backfill_job.status in ['pending', 'running'] %}
+<script>
+    // Auto-refresh when backfill is in progress
+    setTimeout(function() {
+        location.reload();
+    }, 3000);
+</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<h2>{{ filing_type_label }} - {{ target_date }}</h2>
+
+<div class="date-nav">
+    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/{{ filing_type }}">&larr; Previous Day</a>
+    <span class="date-display">{{ target_date.strftime('%B %d, %Y') }}</span>
+    {% if next_date <= today %}
+    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/{{ filing_type }}">Next Day &rarr;</a>
+    {% else %}
+    <span class="muted">Next Day &rarr;</span>
+    {% endif %}
+    {% if target_date != today %}
+    <a href="/dashboard/{{ filing_type }}">Today</a>
+    {% endif %}
+</div>
+
+{% if backfill_job %}
+<div class="backfill-status {{ backfill_job.status }}">
+    {% if backfill_job.status == 'pending' %}
+    <span class="spinner"></span>
+    Starting backfill from FEC API...
+    {% elif backfill_job.status == 'running' %}
+    <span class="spinner"></span>
+    Fetching data from FEC API... ({{ backfill_job.filings_found }} found so far)
+    {% elif backfill_job.status == 'completed' %}
+    Backfill complete. Found {{ backfill_job.filings_found }} {{ 'filings' if filing_type == '3x' else 'events' }}.
+    {% elif backfill_job.status == 'failed' %}
+    Backfill failed: {{ backfill_job.error_message or 'Unknown error' }}
+    {% endif %}
+</div>
+{% endif %}
+
+{% if filing_type == '3x' %}
+{# F3X Table #}
+<table>
+    <thead>
+        <tr>
+            <th>Filed (UTC)</th>
+            <th>Committee ID</th>
+            <th>Committee Name</th>
+            <th>Form</th>
+            <th>Report</th>
+            <th>Coverage</th>
+            <th>Total receipts</th>
+            <th>Raw</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if rows %}
+        {% for r in rows %}
+        <tr>
+            <td>{{ r.filed_at_utc }}</td>
+            <td>{{ r.committee_id }}</td>
+            <td>{{ r.committee_name or "" }}</td>
+            <td>{{ r.form_type }}</td>
+            <td>{{ r.report_type }}</td>
+            <td>{{ r.coverage_from }} → {{ r.coverage_through }}</td>
+            <td class="money">
+                {% if r.total_receipts is not none %}
+                ${{ "{:,.2f}".format(r.total_receipts) }}
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ r.fec_url }}" target="_blank" rel="noreferrer">.fec</a>
+            </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="8">No filings found for this date.</td>
+        </tr>
+        {% endif %}
+    </tbody>
+</table>
+{% else %}
+{# Schedule E Table #}
+<style>
+    .support { color: #28a745; font-weight: bold; }
+    .oppose { color: #dc3545; font-weight: bold; }
+    td.purpose { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+<table>
+    <thead>
+        <tr>
+            <th>Spender</th>
+            <th>Spender ID</th>
+            <th>Candidate</th>
+            <th>S/O</th>
+            <th>Purpose</th>
+            <th>Payee</th>
+            <th>Exp. Date</th>
+            <th>Amount</th>
+            <th>Raw</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if rows %}
+        {% for r in rows %}
+        <tr>
+            <td>{{ r.committee_name or "" }}</td>
+            <td>{{ r.committee_id or r.filer_id or "" }}</td>
+            <td>{{ r.candidate_name or "" }}</td>
+            <td class="{{ 'support' if r.support_oppose == 'S' else 'oppose' if r.support_oppose == 'O' else '' }}">
+                {{ r.support_oppose or "" }}
+            </td>
+            <td class="purpose" title="{{ r.purpose or '' }}">{{ r.purpose or "" }}</td>
+            <td>{{ r.payee_name or "" }}</td>
+            <td>{{ r.expenditure_date or "" }}</td>
+            <td class="money">
+                {% if r.amount is not none %}
+                ${{ "{:,.2f}".format(r.amount) }}
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ r.fec_url }}" target="_blank" rel="noreferrer">.fec</a>
+            </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+            <td colspan="9">No Schedule E events found for this date.</td>
+        </tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

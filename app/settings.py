@@ -15,6 +15,10 @@ class Settings:
     receipts_threshold: float
     f3x_feed: str
     ie_feeds: list[str]
+    # Email settings
+    google_app_pw: str | None
+    email_from: str | None
+    config_password: str | None
 
 
 def load_settings() -> Settings:
@@ -34,10 +38,17 @@ def load_settings() -> Settings:
     else:
         ie_feeds = ["https://efilingapps.fec.gov/rss/generate?forms=F5_24"]
 
+    google_app_pw = os.environ.get("GOOGLE_APP_PW")
+    email_from = os.environ.get("EMAIL_FROM")
+    config_password = os.environ.get("CONFIG_PASSWORD")
+
     return Settings(
         postgres_url=postgres_url,
         gov_api_key=gov_api_key,
         receipts_threshold=receipts_threshold,
         f3x_feed=f3x_feed,
         ie_feeds=ie_feeds,
+        google_app_pw=google_app_pw,
+        email_from=email_from,
+        config_password=config_password,
     )

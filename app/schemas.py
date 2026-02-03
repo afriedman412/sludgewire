@@ -108,3 +108,33 @@ class IEScheduleE(SQLModel, table=True):
     raw_line: str = Field(sa_column=Column(Text, nullable=False))
 
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
+
+
+class EmailRecipient(SQLModel, table=True):
+    __tablename__ = "email_recipients"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(index=True, unique=True)
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class BackfillJob(SQLModel, table=True):
+    __tablename__ = "backfill_jobs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    target_date: date = Field(index=True)
+    filing_type: str = Field(index=True)  # "3x" or "e"
+    status: str = Field(default="pending", index=True)  # pending, running, completed, failed
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    filings_found: int = Field(default=0)
+    error_message: Optional[str] = None
+
+
+class AppConfig(SQLModel, table=True):
+    __tablename__ = "app_config"
+
+    key: str = Field(primary_key=True)
+    value: Optional[str] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
