@@ -56,7 +56,8 @@ jobs:
             --cpu 1 \
             --timeout 300 \
             --min-instances 0 \
-            --max-instances 10
+            --max-instances 10 \
+            --no-cpu-throttling
 
       - name: Show deployment URL
         run: |
