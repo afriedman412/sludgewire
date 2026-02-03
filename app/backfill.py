@@ -54,6 +54,7 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
 
     try:
         filings_found = 0
+        files_checked = 0
         page = 1
         per_page = 100
 
@@ -76,6 +77,13 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
             results = data.get("results", [])
             if not results:
                 break
+
+            # Get total count on first page
+            if page == 1:
+                total_count = data.get("pagination", {}).get("count", 0)
+                job.error_message = f"0/{total_count} files"  # Repurpose for progress
+                session.add(job)
+                session.commit()
 
             for filing in results:
                 filing_id = filing.get("file_number")
@@ -151,6 +159,13 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
                 )
                 filings_found += 1
 
+                # Update progress
+                files_checked += 1
+                job.filings_found = filings_found
+                job.error_message = f"{files_checked}/{total_count} files checked"
+                session.add(job)
+                session.commit()
+
             # Check pagination
             pagination = data.get("pagination", {})
             if page >= pagination.get("pages", 1):
@@ -160,6 +175,7 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
         job.status = "completed"
         job.completed_at = datetime.now(timezone.utc)
         job.filings_found = filings_found
+        job.error_message = None  # Clear progress message
 
     except Exception as e:
         job.status = "failed"
@@ -185,6 +201,8 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
 
     try:
         filings_found = 0
+        files_checked = 0
+        total_count = 0
         page = 1
         per_page = 100
 
@@ -207,6 +225,13 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
             results = data.get("results", [])
             if not results:
                 break
+
+            # Get total count on first page
+            if page == 1:
+                total_count = data.get("pagination", {}).get("count", 0)
+                job.error_message = f"0/{total_count} filings"
+                session.add(job)
+                session.commit()
 
             for filing in results:
                 filing_id = filing.get("file_number")
@@ -277,6 +302,13 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
                     if insert_ie_event(session, event):
                         filings_found += 1
 
+                # Update progress after each filing
+                files_checked += 1
+                job.filings_found = filings_found
+                job.error_message = f"{files_checked}/{total_count} filings ({filings_found} events)"
+                session.add(job)
+                session.commit()
+
             pagination = data.get("pagination", {})
             if page >= pagination.get("pages", 1):
                 break
@@ -285,6 +317,7 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
         job.status = "completed"
         job.completed_at = datetime.now(timezone.utc)
         job.filings_found = filings_found
+        job.error_message = None  # Clear progress message
 
     except Exception as e:
         job.status = "failed"

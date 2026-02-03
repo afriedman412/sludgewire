@@ -92,7 +92,7 @@
     Starting backfill from FEC API...
     {% elif backfill_job.status == 'running' %}
     <span class="spinner"></span>
-    Fetching data from FEC API... ({{ backfill_job.filings_found }} found so far)
+    Fetching data from FEC API... {{ backfill_job.error_message or '' }}
     {% elif backfill_job.status == 'completed' %}
     Backfill complete. Found {{ backfill_job.filings_found }} {{ 'filings' if filing_type == '3x' else 'events' }}.
     {% elif backfill_job.status == 'failed' %}
