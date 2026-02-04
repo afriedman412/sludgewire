@@ -29,6 +29,14 @@ def get_max_new_per_run(session: Session) -> int:
     return get_config_int(session, "max_new_per_run", DEFAULT_MAX_NEW_PER_RUN)
 
 
+def get_email_enabled(session: Session) -> bool:
+    """Check if email alerts are enabled."""
+    config = session.get(AppConfig, "email_enabled")
+    if config and config.value:
+        return config.value.lower() in ("true", "1", "yes")
+    return True  # Default to enabled
+
+
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
     """
     Returns True if we successfully claimed this filing_id (first time seen).

@@ -17,7 +17,7 @@ from .db import make_engine, init_db
 from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob, AppConfig
 import json
 from .auth import verify_admin
-from .repo import DEFAULT_MAX_NEW_PER_RUN
+from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled
 
 # --- App + DB bootstrap ---
 settings = load_settings()
@@ -336,6 +336,9 @@ def config_page(
         except (ValueError, TypeError):
             pass
 
+    # Get email_enabled setting
+    email_enabled = get_email_enabled(session)
+
     return templates.TemplateResponse(
         "config.html",
         {
@@ -345,6 +348,7 @@ def config_page(
             "memory_mb": memory_mb,
             "last_cron_run": last_cron_run,
             "max_new_per_run": max_new_per_run,
+            "email_enabled": email_enabled,
             "message": message,
             "message_type": message_type,
         },
@@ -397,6 +401,29 @@ def delete_recipient(
 
     return RedirectResponse(
         url="/config?message=Recipient not found&message_type=error",
+        status_code=303,
+    )
+
+
+@app.post("/config/settings/email_enabled")
+def update_email_enabled(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    enabled: bool = Form(False),
+):
+    """Toggle email alerts on/off. Admin-only."""
+    config = session.get(AppConfig, "email_enabled")
+    if config:
+        config.value = "true" if enabled else "false"
+        config.updated_at = datetime.now(timezone.utc)
+    else:
+        config = AppConfig(key="email_enabled", value="true" if enabled else "false")
+    session.add(config)
+    session.commit()
+
+    status = "enabled" if enabled else "disabled"
+    return RedirectResponse(
+        url=f"/config?message=Email alerts {status}&message_type=success",
         status_code=303,
     )
 
@@ -796,8 +823,12 @@ def cron_check_new(session: Session = Depends(get_session)):
 
         _log_memory("before_email_check", results)
 
-        # Send email alerts if new filings were found
-        if results["f3x_new"] > 0 or results["ie_events_new"] > 0:
+        # Send email alerts if new filings were found (and emails enabled)
+        email_enabled = get_email_enabled(session)
+        if not email_enabled:
+            print("[CRON] Email alerts disabled in config")
+
+        if email_enabled and (results["f3x_new"] > 0 or results["ie_events_new"] > 0):
             start_utc, end_utc = et_today_utc_bounds()
 
             if results["f3x_new"] > 0:
@@ -839,6 +870,8 @@ def cron_check_new(session: Session = Depends(get_session)):
                         "support_oppose": e.support_oppose,
                         "amount": e.amount,
                         "candidate_name": e.candidate_name,
+                        "purpose": e.purpose,
+                        "payee_name": e.payee_name,
                     } for e in ie_events]
                     send_filing_alert(session, "e", events_data)
                     results["email_sent"] = True
