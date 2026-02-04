@@ -141,6 +141,7 @@ def run_job():
                             select(FilingF3X)
                             .where(FilingF3X.filed_at_utc >= today_start)
                             .where(FilingF3X.total_receipts >= settings.receipts_threshold)
+                            .where(FilingF3X.emailed_at == None)
                             .order_by(FilingF3X.filed_at_utc.desc())
                             .limit(50)
                         )
@@ -153,12 +154,19 @@ def run_job():
                                 "fec_url": f.fec_url,
                             } for f in f3x_filings]
                             send_filing_alert(session, "3x", filings_data)
+                            # Mark as emailed
+                            now = datetime.now(timezone.utc)
+                            for f in f3x_filings:
+                                f.emailed_at = now
+                                session.add(f)
+                            session.commit()
                             log(f"Sent F3X alert for {len(f3x_filings)} filings")
 
                     if total_ie_events > 0:
                         stmt = (
                             select(IEScheduleE)
                             .where(IEScheduleE.filed_at_utc >= today_start)
+                            .where(IEScheduleE.emailed_at == None)
                             .order_by(IEScheduleE.filed_at_utc.desc())
                             .limit(50)
                         )
@@ -174,6 +182,12 @@ def run_job():
                                 "payee_name": e.payee_name,
                             } for e in ie_events_list]
                             send_filing_alert(session, "e", events_data)
+                            # Mark as emailed
+                            now = datetime.now(timezone.utc)
+                            for e in ie_events_list:
+                                e.emailed_at = now
+                                session.add(e)
+                            session.commit()
                             log(f"Sent IE alert for {len(ie_events_list)} events")
 
         except Exception as e:

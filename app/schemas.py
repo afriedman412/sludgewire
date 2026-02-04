@@ -72,6 +72,7 @@ class FilingF3X(SQLModel, table=True):
 
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
     updated_at_utc: datetime = Field(default_factory=datetime.utcnow)
+    emailed_at: Optional[datetime] = Field(default=None)
 
 
 class IEScheduleE(SQLModel, table=True):
@@ -109,6 +110,7 @@ class IEScheduleE(SQLModel, table=True):
     raw_line: str = Field(sa_column=Column(Text, nullable=False))
 
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
+    emailed_at: Optional[datetime] = Field(default=None)
 
 
 class EmailRecipient(SQLModel, table=True):
