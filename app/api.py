@@ -750,7 +750,13 @@ def cron_check_new(session: Session = Depends(get_session)):
                 )
                 f3x_filings = session.exec(stmt).all()
                 if f3x_filings:
-                    filings_data = [_model_dump(f) for f in f3x_filings]
+                    # Only include fields needed for email (avoid large raw_meta)
+                    filings_data = [{
+                        "committee_name": f.committee_name,
+                        "committee_id": f.committee_id,
+                        "total_receipts": f.total_receipts,
+                        "fec_url": f.fec_url,
+                    } for f in f3x_filings]
                     send_filing_alert(session, "3x", filings_data)
                     results["email_sent"] = True
                     results["emails_sent_to"] = recipient_emails
@@ -765,7 +771,14 @@ def cron_check_new(session: Session = Depends(get_session)):
                 )
                 ie_events = session.exec(stmt).all()
                 if ie_events:
-                    events_data = [_model_dump(e) for e in ie_events]
+                    # Only include fields needed for email (avoid large raw_line)
+                    events_data = [{
+                        "committee_name": e.committee_name,
+                        "committee_id": e.committee_id,
+                        "support_oppose": e.support_oppose,
+                        "amount": e.amount,
+                        "candidate_name": e.candidate_name,
+                    } for e in ie_events]
                     send_filing_alert(session, "e", events_data)
                     results["email_sent"] = True
                     results["emails_sent_to"] = recipient_emails
