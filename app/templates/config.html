@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Config - Email Recipients{% endblock %}
+{% block title %}Admin Config{% endblock %}
 
 {% block head %}
 <style>
     .config-section {
         max-width: 600px;
+        margin-bottom: 32px;
     }
     .form-row {
         display: flex;
@@ -29,23 +30,23 @@
     .form-row button:hover {
         background: #0256b9;
     }
-    .recipient-row {
+    .recipient-row, .job-row {
         display: flex;
         align-items: center;
         gap: 8px;
         padding: 8px 0;
         border-bottom: 1px solid #eee;
     }
-    .recipient-email {
+    .recipient-email, .job-info {
         flex: 1;
     }
-    .recipient-status {
+    .recipient-status, .job-status {
         font-size: 0.9em;
     }
-    .recipient-status.active {
+    .recipient-status.active, .job-status.running {
         color: #28a745;
     }
-    .recipient-status.inactive {
+    .recipient-status.inactive, .job-status.pending {
         color: #999;
     }
     .delete-btn {
@@ -73,17 +74,59 @@
         background: #f8d7da;
         color: #721c24;
     }
+    .stat-box {
+        display: inline-block;
+        padding: 12px 20px;
+        background: #f6f8fa;
+        border-radius: 6px;
+        margin-bottom: 16px;
+    }
+    .stat-label {
+        font-size: 0.85em;
+        color: #666;
+    }
+    .stat-value {
+        font-size: 1.5em;
+        font-weight: bold;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<h2>Email Recipients</h2>
+{% if message %}
+<div class="message {{ message_type }}">{{ message }}</div>
+{% endif %}
 
+<h2>System Status</h2>
 <div class="config-section">
-    {% if message %}
-    <div class="message {{ message_type }}">{{ message }}</div>
-    {% endif %}
+    <div class="stat-box">
+        <div class="stat-label">Memory Usage</div>
+        <div class="stat-value">{{ "%.1f"|format(memory_mb) }} MB</div>
+    </div>
+</div>
 
+<h2>Backfill Jobs</h2>
+<div class="config-section">
+    {% if backfill_jobs %}
+    {% for job in backfill_jobs %}
+    <div class="job-row">
+        <span class="job-info">
+            <strong>{{ job.target_date }}</strong> ({{ job.filing_type }})
+            {% if job.error_message %}<br><small>{{ job.error_message }}</small>{% endif %}
+        </span>
+        <span class="job-status {{ job.status }}">{{ job.status }}</span>
+        <form method="POST" action="/config/backfill/{{ job.id }}/delete" style="margin: 0;">
+            <button type="submit" class="delete-btn">Delete</button>
+        </form>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No pending or running backfill jobs.</p>
+    {% endif %}
+</div>
+
+<h2>Email Recipients</h2>
+<div class="config-section">
     <form method="POST" action="/config/recipients">
         <div class="form-row">
             <input type="email" name="email" placeholder="email@example.com" required />

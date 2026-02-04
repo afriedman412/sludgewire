@@ -277,6 +277,22 @@ def api_e_query(
 # Config Endpoints (Protected)
 # -------------------------
 
+def _get_memory_usage_mb() -> float:
+    """Get current process memory usage in MB."""
+    try:
+        import resource
+        # Returns bytes on Linux, need to convert
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # On macOS it's bytes, on Linux it's KB
+        import platform
+        if platform.system() == "Darwin":
+            return usage / (1024 * 1024)
+        else:
+            return usage / 1024
+    except Exception:
+        return 0.0
+
+
 @app.get("/config", response_class=HTMLResponse)
 def config_page(
     request: Request,
@@ -290,11 +306,23 @@ def config_page(
         select(EmailRecipient).order_by(EmailRecipient.created_at.desc())
     ).all()
 
+    # Get pending/running backfill jobs
+    backfill_jobs = session.exec(
+        select(BackfillJob)
+        .where(BackfillJob.status.in_(["pending", "running"]))
+        .order_by(BackfillJob.started_at.desc())
+    ).all()
+
+    # Get memory usage
+    memory_mb = _get_memory_usage_mb()
+
     return templates.TemplateResponse(
         "config.html",
         {
             "request": request,
             "recipients": recipients,
+            "backfill_jobs": backfill_jobs,
+            "memory_mb": memory_mb,
             "message": message,
             "message_type": message_type,
         },
@@ -347,6 +375,29 @@ def delete_recipient(
 
     return RedirectResponse(
         url="/config?message=Recipient not found&message_type=error",
+        status_code=303,
+    )
+
+
+@app.post("/config/backfill/{job_id}/delete")
+def delete_backfill_job(
+    job_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+):
+    """Delete a backfill job. Admin-only."""
+    job = session.get(BackfillJob, job_id)
+
+    if job:
+        session.delete(job)
+        session.commit()
+        return RedirectResponse(
+            url="/config?message=Backfill job deleted&message_type=success",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url="/config?message=Job not found&message_type=error",
         status_code=303,
     )
 
