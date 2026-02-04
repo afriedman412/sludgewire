@@ -5,9 +5,11 @@ from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
-from .fec_parse import download_fec_text, parse_fec_filing, extract_committee_name, extract_schedule_e_best_effort, sha256_hex
-from .repo import claim_filing, insert_ie_event, get_max_new_per_run
+from .fec_parse import download_fec_text, parse_fec_filing, extract_committee_name, extract_schedule_e_best_effort, sha256_hex, FileTooLargeError
+from .repo import claim_filing, insert_ie_event, get_max_new_per_run, record_skipped_filing
 from .schemas import IEScheduleE
+
+MAX_FILE_SIZE_MB = 50  # Skip files larger than this
 
 
 def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, int]:
@@ -31,7 +33,15 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
             if not claim_filing(session, filing_id, source_feed=feed_url):
                 continue
 
-            fec_text = download_fec_text(item.link)
+            try:
+                fec_text = download_fec_text(item.link, max_size_mb=MAX_FILE_SIZE_MB)
+            except FileTooLargeError as e:
+                print(f"[IE] Skipping {filing_id}: {e.size_mb:.1f}MB exceeds limit")
+                record_skipped_filing(
+                    session, filing_id, "too_large",
+                    file_size_mb=e.size_mb, fec_url=item.link
+                )
+                continue
             parsed = parse_fec_filing(fec_text)
 
             meta = item.meta

@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy import select
 from sqlmodel import Session
 
-from .schemas import SeenFiling, FilingF3X, IEScheduleE, AppConfig
+from .schemas import SeenFiling, FilingF3X, IEScheduleE, AppConfig, SkippedFiling
 
 
 # Default values for configurable settings
@@ -35,6 +35,28 @@ def get_email_enabled(session: Session) -> bool:
     if config and config.value:
         return config.value.lower() in ("true", "1", "yes")
     return True  # Default to enabled
+
+
+def record_skipped_filing(
+    session: Session,
+    filing_id: int,
+    reason: str,
+    file_size_mb: float = None,
+    fec_url: str = None,
+) -> None:
+    """Record a filing that was skipped due to size or other issues."""
+    existing = session.get(SkippedFiling, filing_id)
+    if existing:
+        return  # Already recorded
+
+    skipped = SkippedFiling(
+        filing_id=filing_id,
+        reason=reason,
+        file_size_mb=file_size_mb,
+        fec_url=fec_url,
+    )
+    session.add(skipped)
+    session.flush()
 
 
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:

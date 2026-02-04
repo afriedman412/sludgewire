@@ -20,7 +20,35 @@ def _get_fecfile():
     return _fecfile
 
 
-def download_fec_text(fec_url: str) -> str:
+class FileTooLargeError(Exception):
+    """Raised when a file exceeds the size limit."""
+    def __init__(self, url: str, size_mb: float, limit_mb: float):
+        self.url = url
+        self.size_mb = size_mb
+        self.limit_mb = limit_mb
+        super().__init__(f"File {url} is {size_mb:.1f}MB, exceeds limit of {limit_mb}MB")
+
+
+def check_file_size(fec_url: str, timeout: int = 10) -> Optional[float]:
+    """Check file size via HEAD request. Returns size in MB, or None if unknown."""
+    try:
+        r = requests.head(fec_url, timeout=timeout, allow_redirects=True)
+        r.raise_for_status()
+        content_length = r.headers.get("Content-Length")
+        if content_length:
+            return int(content_length) / (1024 * 1024)  # Convert to MB
+    except Exception:
+        pass
+    return None
+
+
+def download_fec_text(fec_url: str, max_size_mb: float = None) -> str:
+    """Download FEC file text. Optionally check size first."""
+    if max_size_mb is not None:
+        size_mb = check_file_size(fec_url)
+        if size_mb is not None and size_mb > max_size_mb:
+            raise FileTooLargeError(fec_url, size_mb, max_size_mb)
+
     r = requests.get(fec_url, timeout=60)
     r.raise_for_status()
     return r.text

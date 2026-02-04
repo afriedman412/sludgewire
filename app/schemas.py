@@ -138,3 +138,14 @@ class AppConfig(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: Optional[str] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SkippedFiling(SQLModel, table=True):
+    """Filings that were skipped due to size or other issues."""
+    __tablename__ = "skipped_filings"
+
+    filing_id: int = Field(primary_key=True)
+    reason: str  # "too_large", "download_error", etc.
+    file_size_mb: Optional[float] = None
+    fec_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -5,8 +5,10 @@ from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
-from .fec_parse import download_fec_text, parse_f3x_header_only, extract_committee_name
-from .repo import claim_filing, upsert_f3x, get_max_new_per_run
+from .fec_parse import download_fec_text, parse_f3x_header_only, extract_committee_name, FileTooLargeError
+from .repo import claim_filing, upsert_f3x, get_max_new_per_run, record_skipped_filing
+
+MAX_FILE_SIZE_MB = 50  # Skip files larger than this
 
 
 def _log_mem(label: str):
@@ -49,7 +51,15 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
         print(f"[F3X] Processing new filing {filing_id} ({new_count + 1})")
         _log_mem(f"before_download_{filing_id}")
 
-        fec_text = download_fec_text(item.link)
+        try:
+            fec_text = download_fec_text(item.link, max_size_mb=MAX_FILE_SIZE_MB)
+        except FileTooLargeError as e:
+            print(f"[F3X] Skipping {filing_id}: {e.size_mb:.1f}MB exceeds limit")
+            record_skipped_filing(
+                session, filing_id, "too_large",
+                file_size_mb=e.size_mb, fec_url=item.link
+            )
+            continue
         _log_mem(f"after_download_{filing_id}")
 
         # Light parse - header only, no fecfile
