@@ -52,10 +52,10 @@ jobs:
             --set-env-vars "CONFIG_PASSWORD=${{ secrets.CONFIG_PASSWORD }}" \
             --set-env-vars "GOV_API_KEY=${{ secrets.GOV_API_KEY }}" \
             --add-cloudsql-instances ${{ secrets.CLOUD_SQL_CONNECTION }} \
-            --memory 512Mi \
+            --memory 2Gi \
             --cpu 1 \
             --timeout 300 \
-            --min-instances 0 \
+            --min-instances 1 \
             --max-instances 10 \
             --no-cpu-throttling
 
