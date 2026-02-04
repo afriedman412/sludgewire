@@ -31,6 +31,76 @@ def parse_fec_filing(fec_text: str) -> dict:
     return _get_fecfile().loads(fec_text)
 
 
+def parse_f3x_header_only(fec_text: str) -> dict:
+    """
+    Parse just the F3X header to extract summary fields.
+    Much lighter than fecfile.loads() - doesn't load itemizations.
+
+    Returns dict with 'filing' key containing header fields.
+    """
+    result = {"filing": {}}
+    filing = result["filing"]
+
+    # F3X files are pipe-delimited. Header is in first few lines.
+    lines = fec_text.split('\n')
+
+    for line in lines[:100]:  # Header is in first ~100 lines max
+        if not line.strip():
+            continue
+        parts = line.split('|')
+        if not parts:
+            continue
+
+        rec_type = parts[0].strip().upper()
+
+        # F3X/F3XN/F3XA/F3XT record has committee name in position 2
+        if rec_type.startswith('F3X') and len(parts) > 2:
+            filing["form_type"] = parts[0].strip()
+            filing["committee_name"] = parts[1].strip()
+            filing["filer_committee_id_name"] = parts[1].strip()
+
+        # Summary line (SA/SB) or look for "6a" type field which has total receipts
+        # Actually, the totals are in specific summary records
+        # In F3X, look for the line that starts with total receipts indicator
+
+        # Try to find total receipts - usually in a line starting with specific codes
+        # or we can try fecfile just on the first chunk
+        if rec_type in ('F3X', 'F3XN', 'F3XA', 'F3XT'):
+            # Try common positions for col_a_total_receipts (position varies by version)
+            # In newer versions it's around position 6-7
+            for pos in range(4, min(20, len(parts))):
+                val_str = parts[pos].strip()
+                if val_str and val_str.replace('.', '').replace('-', '').isdigit():
+                    try:
+                        val = float(val_str)
+                        # Total receipts is usually a large positive number
+                        if val >= 0 and "col_a_total_receipts" not in filing:
+                            filing["col_a_total_receipts"] = val_str
+                            break
+                    except ValueError:
+                        pass
+
+    # Fallback: if we didn't find totals, use fecfile on truncated text
+    # Only keep first 200 lines (header/summary) - skip itemizations
+    if "col_a_total_receipts" not in filing:
+        try:
+            truncated = '\n'.join(fec_text.split('\n')[:200])
+            full_parsed = _get_fecfile().loads(truncated)
+            filing_data = full_parsed.get("filing", {})
+            if "col_a_total_receipts" in filing_data:
+                filing["col_a_total_receipts"] = filing_data["col_a_total_receipts"]
+            if "committee_name" not in filing and "committee_name" in filing_data:
+                filing["committee_name"] = filing_data["committee_name"]
+            if "filer_committee_id_name" in filing_data:
+                filing["filer_committee_id_name"] = filing_data["filer_committee_id_name"]
+            del full_parsed
+            del truncated
+        except Exception:
+            pass
+
+    return result
+
+
 def f3x_total_receipts(fec_text: str) -> Optional[float]:
     parsed = _get_fecfile().loads(fec_text)
     val = parsed.get("filing", {}).get("col_a_total_receipts")

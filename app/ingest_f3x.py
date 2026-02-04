@@ -5,7 +5,7 @@ from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
-from .fec_parse import download_fec_text, parse_fec_filing, extract_committee_name
+from .fec_parse import download_fec_text, parse_f3x_header_only, extract_committee_name
 from .repo import claim_filing, upsert_f3x
 
 
@@ -53,7 +53,7 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
         fec_text = download_fec_text(item.link)
         _log_mem(f"after_download_{filing_id}")
 
-        parsed = parse_fec_filing(fec_text)
+        parsed = parse_f3x_header_only(fec_text)  # Light parse - header only, no fecfile
         _log_mem(f"after_parse_{filing_id}")
         total = parsed.get("filing", {}).get("col_a_total_receipts")
         if total not in (None, ""):
