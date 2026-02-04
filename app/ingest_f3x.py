@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+from datetime import datetime, timezone
 from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
@@ -33,8 +34,14 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
     _log_mem("after_fetch_rss")
     new_count = 0
     skipped = 0
+    today = datetime.now(timezone.utc).date()
 
     for i, item in enumerate(items):
+        # Stop when we hit filings from before today (feed is newest-first)
+        if item.pub_date_utc and item.pub_date_utc.date() < today:
+            print(f"[F3X] Reached filings from {item.pub_date_utc.date()}, stopping")
+            break
+
         # Stop if we've processed enough new filings this run
         if new_count >= max_per_run:
             print(

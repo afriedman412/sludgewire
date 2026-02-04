@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+from datetime import datetime, timezone
 from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
@@ -16,11 +17,17 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
     max_per_run = get_max_new_per_run(session)
     new_filings = 0
     new_events = 0
+    today = datetime.now(timezone.utc).date()
 
     for feed_url in feed_urls:
         items = fetch_rss_items(feed_url)
         print(f"[IE] RSS feed {feed_url} has {len(items)} items (max {max_per_run} per run)")
         for item in items:
+            # Stop when we hit filings from before today (feed is newest-first)
+            if item.pub_date_utc and item.pub_date_utc.date() < today:
+                print(f"[IE] Reached filings from {item.pub_date_utc.date()}, stopping")
+                break
+
             # Stop if we've processed enough new filings this run
             if new_filings >= max_per_run:
                 print(
