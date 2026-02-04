@@ -5,7 +5,7 @@ from datetime import datetime, date
 from typing import Optional, Dict, Any
 
 from sqlmodel import SQLModel, Field, Column
-from sqlalchemy import BigInteger, Text
+from sqlalchemy import BigInteger, Text, PrimaryKeyConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 
 
@@ -42,9 +42,10 @@ class Committee(SQLModel, table=True):
 
 class SeenFiling(SQLModel, table=True):
     __tablename__ = "seen_filings"
+    __table_args__ = (PrimaryKeyConstraint("filing_id", "source_feed"),)
 
-    filing_id: int = Field(sa_column=Column(BigInteger, primary_key=True))
-    source_feed: Optional[str] = Field(default=None)
+    filing_id: int = Field(sa_column=Column(BigInteger))
+    source_feed: str = Field(default="")
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
 
 

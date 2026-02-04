@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from .schemas import SeenFiling, FilingF3X, IEScheduleE, AppConfig, SkippedFiling
@@ -49,28 +50,39 @@ def record_skipped_filing(
     if existing:
         return  # Already recorded
 
-    skipped = SkippedFiling(
-        filing_id=filing_id,
-        reason=reason,
-        file_size_mb=file_size_mb,
-        fec_url=fec_url,
-    )
-    session.add(skipped)
-    session.flush()
+    try:
+        with session.begin_nested():
+            skipped = SkippedFiling(
+                filing_id=filing_id,
+                reason=reason,
+                file_size_mb=file_size_mb,
+                fec_url=fec_url,
+            )
+            session.add(skipped)
+            session.flush()
+    except IntegrityError:
+        pass  # Already recorded by another process
 
 
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
     """
-    Returns True if we successfully claimed this filing_id (first time seen).
+    Returns True if we successfully claimed this filing_id+source_feed (first time seen).
+    Handles race conditions where another process already claimed it.
     """
-    existing = session.get(SeenFiling, filing_id)
+    existing = session.get(SeenFiling, (filing_id, source_feed))
     if existing:
         return False
 
-    session.add(SeenFiling(filing_id=filing_id, source_feed=source_feed))
-    # flush to surface unique/PK issues immediately
-    session.flush()
-    return True
+    try:
+        # Use savepoint so IntegrityError only rolls back this insert, not the whole session
+        with session.begin_nested():
+            session.add(SeenFiling(filing_id=filing_id, source_feed=source_feed))
+            session.flush()
+        return True
+    except IntegrityError:
+        # Another process already claimed this filing - savepoint auto-rolled back
+        record_skipped_filing(session, filing_id, reason=f"duplicate:{source_feed}")
+        return False
 
 
 def upsert_f3x(
@@ -137,6 +149,10 @@ def insert_ie_event(session: Session, event: IEScheduleE) -> bool:
     existing = session.get(IEScheduleE, event.event_id)
     if existing:
         return False
-    session.add(event)
-    session.flush()
-    return True
+    try:
+        with session.begin_nested():
+            session.add(event)
+            session.flush()
+        return True
+    except IntegrityError:
+        return False
