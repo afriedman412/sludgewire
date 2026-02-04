@@ -8,7 +8,16 @@ from datetime import date, datetime
 from typing import Iterable, Optional, Tuple, List
 
 import requests
-import fecfile
+
+# Lazy import fecfile - it's heavy and loads pandas/numpy
+_fecfile = None
+
+def _get_fecfile():
+    global _fecfile
+    if _fecfile is None:
+        import fecfile
+        _fecfile = fecfile
+    return _fecfile
 
 
 def download_fec_text(fec_url: str) -> str:
@@ -19,11 +28,11 @@ def download_fec_text(fec_url: str) -> str:
 
 def parse_fec_filing(fec_text: str) -> dict:
     """Parse FEC filing text and return the parsed dict."""
-    return fecfile.loads(fec_text)
+    return _get_fecfile().loads(fec_text)
 
 
 def f3x_total_receipts(fec_text: str) -> Optional[float]:
-    parsed = fecfile.loads(fec_text)
+    parsed = _get_fecfile().loads(fec_text)
     val = parsed.get("filing", {}).get("col_a_total_receipts")
     if val in (None, ""):
         return None
@@ -70,12 +79,12 @@ def extract_schedule_e_best_effort(fec_text: str, parsed: dict = None) -> Iterab
 
     Args:
         fec_text: Raw FEC filing text
-        parsed: Optional pre-parsed dict from fecfile.loads() to avoid double-parsing
+        parsed: Optional pre-parsed dict from _get_fecfile().loads() to avoid double-parsing
     """
     # First, try to get structured data from fecfile
     try:
         if parsed is None:
-            parsed = fecfile.loads(fec_text)
+            parsed = _get_fecfile().loads(fec_text)
         filing = parsed.get("filing", {})
         itemizations = parsed.get("itemizations", {})
 

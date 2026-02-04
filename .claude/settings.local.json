@@ -4,7 +4,9 @@
       "Bash(./venv/bin/python:*)",
       "Bash(python -m py_compile:*)",
       "Bash(PYTHONPATH=. python:*)",
-      "Bash(./venv/bin/pip install:*)"
+      "Bash(./venv/bin/pip install:*)",
+      "Bash(chmod:*)",
+      "Bash(grep:*)"
     ]
   }
 }

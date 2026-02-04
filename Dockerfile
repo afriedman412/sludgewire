@@ -28,4 +28,4 @@ EXPOSE 8080
 
 # Default command: run web server with gunicorn
 # Override with MODE=job for background jobs
-CMD ["sh", "-c", "if [ \"$MODE\" = 'job' ]; then python -m scripts.ingest_job; else gunicorn app.main:app --bind 0.0.0.0:8080 --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 120; fi"]
+CMD ["sh", "-c", "if [ \"$MODE\" = 'job' ]; then python -m scripts.ingest_job; else gunicorn app.main:app --bind 0.0.0.0:8080 --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 300; fi"]

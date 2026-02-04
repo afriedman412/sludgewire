@@ -677,6 +677,15 @@ def _save_cron_status(session: Session, results: dict):
     session.commit()
 
 
+def _log_memory(label: str, results: dict):
+    """Log memory usage at a checkpoint."""
+    mb = _get_memory_usage_mb()
+    if "memory_log" not in results:
+        results["memory_log"] = []
+    results["memory_log"].append({"step": label, "memory_mb": round(mb, 1)})
+    print(f"[MEMORY] {label}: {mb:.1f} MB")
+
+
 @app.get("/api/cron/check-new")
 def cron_check_new(session: Session = Depends(get_session)):
     """Cron endpoint to check for new filings and send email alerts.
@@ -684,6 +693,7 @@ def cron_check_new(session: Session = Depends(get_session)):
     This endpoint is designed to be called by a scheduled task (e.g., Cloud Scheduler).
     It runs the ingestion process and sends email alerts if new filings are found.
     """
+    import gc
     from fastapi.responses import JSONResponse
     from .ingest_f3x import run_f3x
     from .ingest_ie import run_ie_schedule_e
@@ -703,11 +713,14 @@ def cron_check_new(session: Session = Depends(get_session)):
         "emails_sent_to": [],
     }
 
+    _log_memory("start", results)
+
     # Save "running" status immediately so we can see if it crashes mid-run
     _save_cron_status(session, results)
 
     try:
         # Run F3X ingestion
+        _log_memory("before_f3x_ingestion", results)
         try:
             f3x_count = run_f3x(
                 session,
@@ -717,8 +730,12 @@ def cron_check_new(session: Session = Depends(get_session)):
             results["f3x_new"] = f3x_count
         except Exception as e:
             results["f3x_error"] = str(e)
+        _log_memory("after_f3x_ingestion", results)
+        gc.collect()
+        _log_memory("after_f3x_gc", results)
 
         # Run IE Schedule E ingestion
+        _log_memory("before_ie_ingestion", results)
         try:
             ie_filings, ie_events = run_ie_schedule_e(
                 session,
@@ -728,12 +745,17 @@ def cron_check_new(session: Session = Depends(get_session)):
             results["ie_events_new"] = ie_events
         except Exception as e:
             results["ie_error"] = str(e)
+        _log_memory("after_ie_ingestion", results)
+        gc.collect()
+        _log_memory("after_ie_gc", results)
 
         # Get active email recipients for logging
         active_recipients = session.exec(
             select(EmailRecipient).where(EmailRecipient.active == True)
         ).all()
         recipient_emails = [r.email for r in active_recipients]
+
+        _log_memory("before_email_check", results)
 
         # Send email alerts if new filings were found
         if results["f3x_new"] > 0 or results["ie_events_new"] > 0:
@@ -788,6 +810,9 @@ def cron_check_new(session: Session = Depends(get_session)):
         results["status"] = "completed_with_errors" if has_errors else "success"
         results["http_status"] = 200  # We still return 200 for partial errors
         results["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+        gc.collect()
+        _log_memory("final", results)
 
         _save_cron_status(session, results)
         return results
