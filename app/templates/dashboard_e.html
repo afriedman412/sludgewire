@@ -79,7 +79,10 @@
                 {{ r.candidate_name or "" }}
                 {% endif %}
             </td>
-            <td>{{ [r.candidate_office, r.candidate_state, r.candidate_district]|select|join('-') }}</td>
+            <td>
+                {{ [r.candidate_office, r.candidate_state, r.candidate_district]|select|join('-') }}
+                {% if r.candidate_party %}({{ r.candidate_party }}){% endif %}
+            </td>
             <td class="{{ 'support' if r.support_oppose == 'S' else 'oppose' if r.support_oppose == 'O' else '' }}">
                 {{ r.support_oppose or "" }}
             </td>

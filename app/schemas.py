@@ -101,6 +101,7 @@ class IEScheduleE(SQLModel, table=True):
     candidate_office: Optional[str] = None
     candidate_state: Optional[str] = None
     candidate_district: Optional[str] = None
+    candidate_party: Optional[str] = None
 
     election_code: Optional[str] = None
     purpose: Optional[str] = None

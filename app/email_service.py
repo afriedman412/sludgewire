@@ -155,12 +155,15 @@ def send_filing_alert(
             candidate_id = f.get('candidate_id', '')
             candidate_name = f.get('candidate_name') or 'N/A'
             candidate_link = f'<a href="https://www.fec.gov/data/candidate/{candidate_id}/">{candidate_name}</a>' if candidate_id else candidate_name
-            # Format office as "H-CA-12" or "S-TX" or "P"
+            # Format office as "H-CA-12 (DEM)" or "S-TX (REP)" or "P"
             office = f.get('candidate_office', '')
             state = f.get('candidate_state', '')
             district = f.get('candidate_district', '')
+            party = f.get('candidate_party', '')
             office_parts = [p for p in [office, state, district] if p]
             office_str = '-'.join(office_parts) if office_parts else ''
+            if party:
+                office_str = f"{office_str} ({party})" if office_str else party
             so = f.get('support_oppose', '')
             so_style = 'color: #28a745; font-weight: bold;' if so == 'S' else 'color: #dc3545; font-weight: bold;' if so == 'O' else ''
             rows_html += f"""

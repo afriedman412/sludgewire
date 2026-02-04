@@ -85,6 +85,7 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
                     candidate_office=fields["candidate_office"],
                     candidate_state=fields["candidate_state"],
                     candidate_district=fields["candidate_district"],
+                    candidate_party=fields["candidate_party"],
                     election_code=fields["election_code"],
                     purpose=fields["purpose"],
                     payee_name=fields["payee_name"],

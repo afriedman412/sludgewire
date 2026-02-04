@@ -313,6 +313,7 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
                         candidate_office=fields.get("candidate_office"),
                         candidate_state=fields.get("candidate_state"),
                         candidate_district=fields.get("candidate_district"),
+                        candidate_party=fields.get("candidate_party"),
                         election_code=fields.get("election_code"),
                         purpose=fields.get("purpose"),
                         payee_name=fields.get("payee_name"),

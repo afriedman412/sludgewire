@@ -185,6 +185,7 @@ def run_job():
                                 "candidate_office": e.candidate_office,
                                 "candidate_state": e.candidate_state,
                                 "candidate_district": e.candidate_district,
+                                "candidate_party": e.candidate_party,
                                 "support_oppose": e.support_oppose,
                                 "purpose": e.purpose,
                                 "payee_name": e.payee_name,
