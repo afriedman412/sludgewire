@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
@@ -35,7 +36,8 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
             form_name = extract_committee_name(parsed)
             committee_name = resolve_committee_name(session, committee_id, fallback_name=form_name)
 
-            for raw_line, fields in extract_schedule_e_best_effort(fec_text):
+            # Pass pre-parsed dict to avoid double-parsing
+            for raw_line, fields in extract_schedule_e_best_effort(fec_text, parsed=parsed):
                 # Stable event id within a filing based on raw line
                 event_id = sha256_hex(f"{filing_id}|{raw_line}")
 
@@ -62,11 +64,16 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
                     purpose=fields["purpose"],
                     payee_name=fields["payee_name"],
                     fec_url=item.link,
-                    raw_line=raw_line,
+                    raw_line=raw_line[:200],  # Truncate to save memory
                 )
 
                 if insert_ie_event(session, event):
                     new_events += 1
+
+            # Explicit cleanup to free memory
+            del fec_text
+            del parsed
+            gc.collect()
 
             new_filings += 1
 

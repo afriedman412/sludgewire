@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
@@ -53,6 +54,11 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
             threshold_flag=threshold_flag,
             raw_meta=meta,
         )
+
+        # Explicit cleanup to free memory
+        del fec_text
+        del parsed
+        gc.collect()
 
         new_count += 1
 

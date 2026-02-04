@@ -61,16 +61,21 @@ def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-def extract_schedule_e_best_effort(fec_text: str) -> Iterable[Tuple[str, dict]]:
+def extract_schedule_e_best_effort(fec_text: str, parsed: dict = None) -> Iterable[Tuple[str, dict]]:
     """
     Yields (raw_line, extracted_fields_dict).
 
     Uses fecfile parsed output for structured field extraction.
     Falls back to raw line parsing if fecfile fails.
+
+    Args:
+        fec_text: Raw FEC filing text
+        parsed: Optional pre-parsed dict from fecfile.loads() to avoid double-parsing
     """
     # First, try to get structured data from fecfile
     try:
-        parsed = fecfile.loads(fec_text)
+        if parsed is None:
+            parsed = fecfile.loads(fec_text)
         filing = parsed.get("filing", {})
         itemizations = parsed.get("itemizations", {})
 

@@ -23,6 +23,11 @@ engine = make_engine(settings)
 init_db(engine)
 
 app = FastAPI(title="FEC Monitor", version="0.2.0")
+
+# Rate-limiting for current-day ingestion (in-memory, resets on deploy)
+_last_ingestion_time: Optional[datetime] = None
+_ingestion_lock = threading.Lock()
+INGESTION_COOLDOWN_MINUTES = 5
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -84,6 +89,9 @@ def dashboard_3x(
     threshold: float = Query(default=50_000, ge=0),
     limit: int = Query(default=200, ge=1, le=2000),
 ):
+    # Trigger rate-limited ingestion on page load
+    _maybe_run_ingestion()
+
     start_utc, end_utc = et_today_utc_bounds()
     today = start_utc.astimezone(ET).date()
 
@@ -123,6 +131,9 @@ def dashboard_e(
     Shows Schedule E EVENTS filed today (ET).
     If you want "filings" instead, we can switch this to a DISTINCT filing_id query.
     """
+    # Trigger rate-limited ingestion on page load
+    _maybe_run_ingestion()
+
     start_utc, end_utc = et_today_utc_bounds()
     today = start_utc.astimezone(ET).date()
 
@@ -340,6 +351,49 @@ def delete_recipient(
     )
 
 
+@app.post("/config/backfill/{year:int}/{month:int}/{day:int}/{filing_type}")
+def trigger_backfill(
+    year: int,
+    month: int,
+    day: int,
+    filing_type: str,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+):
+    """Manually trigger backfill for a specific date. Admin-only."""
+    from .backfill import get_backfill_status, get_or_create_backfill_job
+
+    if filing_type not in ("3x", "e"):
+        return {"error": "Invalid filing_type. Must be '3x' or 'e'"}, 400
+
+    try:
+        target_date = date(year, month, day)
+    except ValueError:
+        return {"error": "Invalid date"}, 400
+
+    today = datetime.now(timezone.utc).astimezone(ET).date()
+    if target_date >= today:
+        return {"error": "Cannot backfill current or future dates"}, 400
+
+    # Check if already running or completed
+    job = get_backfill_status(session, target_date, filing_type)
+    if job and job.status == "running":
+        return {"status": "already_running", "job_id": job.id}
+    if job and job.status == "completed":
+        return {"status": "already_completed", "filings_found": job.filings_found}
+
+    # Create/reset job and trigger backfill
+    job = get_or_create_backfill_job(session, target_date, filing_type)
+    _trigger_backfill_async(target_date, filing_type)
+
+    return {
+        "status": "started",
+        "date": target_date.isoformat(),
+        "filing_type": filing_type,
+        "check_status_at": f"/api/backfill/status/{year}/{month}/{day}/{filing_type}",
+    }
+
+
 # -------------------------
 # Date-based Dashboards with Backfill
 # -------------------------
@@ -347,7 +401,8 @@ def delete_recipient(
 def _date_utc_bounds(target_date: date) -> tuple[datetime, datetime]:
     """Return [start_utc, end_utc) for a specific date in ET."""
     start_et = datetime.combine(target_date, time(0, 0, 0), tzinfo=ET)
-    end_et = datetime.combine(target_date + timedelta(days=1), time(0, 0, 0), tzinfo=ET)
+    end_et = datetime.combine(
+        target_date + timedelta(days=1), time(0, 0, 0), tzinfo=ET)
     return start_et.astimezone(timezone.utc), end_et.astimezone(timezone.utc)
 
 
@@ -366,6 +421,43 @@ def _trigger_backfill_async(target_date: date, filing_type: str):
     thread.start()
 
 
+def _maybe_run_ingestion() -> bool:
+    """Run ingestion if cooldown has passed. Returns True if ingestion ran."""
+    global _last_ingestion_time
+
+    now = datetime.now(timezone.utc)
+
+    with _ingestion_lock:
+        if _last_ingestion_time is not None:
+            elapsed = (now - _last_ingestion_time).total_seconds() / 60
+            if elapsed < INGESTION_COOLDOWN_MINUTES:
+                return False
+        _last_ingestion_time = now
+
+    # Run ingestion in background thread to not block page load
+    def run():
+        from .ingest_f3x import run_f3x
+        from .ingest_ie import run_ie_schedule_e
+
+        with Session(engine) as bg_session:
+            try:
+                run_f3x(
+                    bg_session,
+                    feed_url=settings.f3x_feed,
+                    receipts_threshold=settings.receipts_threshold,
+                )
+            except Exception:
+                pass
+            try:
+                run_ie_schedule_e(bg_session, feed_urls=settings.ie_feeds)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return True
+
+
 @app.get("/{year:int}/{month:int}/{day:int}/3x", response_class=HTMLResponse)
 def dashboard_date_3x(
     request: Request,
@@ -375,8 +467,8 @@ def dashboard_date_3x(
     session: Session = Depends(get_session),
     limit: int = Query(default=500, ge=1, le=5000),
 ):
-    """Date-based F3X dashboard with on-demand backfill."""
-    from .backfill import get_backfill_status, get_or_create_backfill_job
+    """Date-based F3X dashboard. Backfill must be triggered manually via /config."""
+    from .backfill import get_backfill_status
 
     try:
         target_date = date(year, month, day)
@@ -385,13 +477,12 @@ def dashboard_date_3x(
 
     today = datetime.now(timezone.utc).astimezone(ET).date()
 
-    # Check if we need to trigger backfill
+    # For current day, trigger rate-limited ingestion
+    if target_date == today:
+        _maybe_run_ingestion()
+
+    # Check backfill status (but don't auto-trigger)
     backfill_job = get_backfill_status(session, target_date, "3x")
-    if backfill_job is None and target_date < today:
-        # Create job and trigger backfill
-        backfill_job = get_or_create_backfill_job(session, target_date, "3x")
-        _trigger_backfill_async(target_date, "3x")
-        session.refresh(backfill_job)
 
     # Query filings for this date - always filter by receipts threshold
     threshold = settings.receipts_threshold
@@ -432,8 +523,8 @@ def dashboard_date_e(
     session: Session = Depends(get_session),
     limit: int = Query(default=500, ge=1, le=5000),
 ):
-    """Date-based Schedule E dashboard with on-demand backfill."""
-    from .backfill import get_backfill_status, get_or_create_backfill_job
+    """Date-based Schedule E dashboard. Backfill must be triggered manually via /config."""
+    from .backfill import get_backfill_status
 
     try:
         target_date = date(year, month, day)
@@ -442,12 +533,12 @@ def dashboard_date_e(
 
     today = datetime.now(timezone.utc).astimezone(ET).date()
 
-    # Check if we need to trigger backfill
+    # For current day, trigger rate-limited ingestion
+    if target_date == today:
+        _maybe_run_ingestion()
+
+    # Check backfill status (but don't auto-trigger)
     backfill_job = get_backfill_status(session, target_date, "e")
-    if backfill_job is None and target_date < today:
-        backfill_job = get_or_create_backfill_job(session, target_date, "e")
-        _trigger_backfill_async(target_date, "e")
-        session.refresh(backfill_job)
 
     # Query events for this date
     start_utc, end_utc = _date_utc_bounds(target_date)

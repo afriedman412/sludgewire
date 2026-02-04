@@ -1,6 +1,7 @@
 """FEC API backfill logic for fetching historical data by date."""
 from __future__ import annotations
 
+import gc
 from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
@@ -102,12 +103,14 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
 
                 # Download and parse the FEC file
                 fec_url = f"https://docquery.fec.gov/dcdev/posted/{filing_id}.fec"
+                fec_text = None
+                parsed = {}
                 try:
                     fec_text = download_fec_text(fec_url)
                     parsed = parse_fec_filing(fec_text)
                 except Exception:
                     # If we can't download, still record basic info from API
-                    parsed = {}
+                    pass
 
                 total = parsed.get("filing", {}).get("col_a_total_receipts")
                 if total not in (None, ""):
@@ -164,6 +167,11 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
                     raw_meta=filing,
                 )
                 filings_found += 1
+
+                # Explicit cleanup to free memory
+                del fec_text
+                del parsed
+                gc.collect()
 
                 # Update progress
                 files_checked += 1
@@ -309,10 +317,14 @@ def backfill_date_e(session: Session, target_date: date) -> BackfillJob:
                         purpose=fields.get("purpose"),
                         payee_name=fields.get("payee_name"),
                         fec_url=fec_url,
-                        raw_line=raw_line,
+                        raw_line=raw_line[:200],  # Truncate to save memory
                     )
                     if insert_ie_event(session, event):
                         filings_found += 1
+
+                # Explicit cleanup to free memory
+                del fec_text
+                gc.collect()
 
                 # Update progress after each filing
                 files_checked += 1
