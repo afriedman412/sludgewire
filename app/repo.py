@@ -51,17 +51,17 @@ def record_skipped_filing(
         return  # Already recorded
 
     try:
-        with session.begin_nested():
-            skipped = SkippedFiling(
-                filing_id=filing_id,
-                reason=reason,
-                file_size_mb=file_size_mb,
-                fec_url=fec_url,
-            )
-            session.add(skipped)
-            session.flush()
-    except IntegrityError:
-        pass  # Already recorded by another process
+        session.begin_nested()
+        skipped = SkippedFiling(
+            filing_id=filing_id,
+            reason=reason,
+            file_size_mb=file_size_mb,
+            fec_url=fec_url,
+        )
+        session.add(skipped)
+        session.flush()
+    except Exception:
+        session.rollback()
 
 
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
@@ -74,14 +74,13 @@ def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
         return False
 
     try:
-        # Use savepoint so IntegrityError only rolls back this insert, not the whole session
-        with session.begin_nested():
-            session.add(SeenFiling(filing_id=filing_id, source_feed=source_feed))
-            session.flush()
+        session.begin_nested()
+        session.add(SeenFiling(filing_id=filing_id, source_feed=source_feed))
+        session.flush()
         return True
-    except IntegrityError:
-        # Another process already claimed this filing - savepoint auto-rolled back
-        record_skipped_filing(session, filing_id, reason=f"duplicate:{source_feed}")
+    except Exception:
+        # Duplicate or other error - rollback the savepoint and continue
+        session.rollback()
         return False
 
 
@@ -150,9 +149,10 @@ def insert_ie_event(session: Session, event: IEScheduleE) -> bool:
     if existing:
         return False
     try:
-        with session.begin_nested():
-            session.add(event)
-            session.flush()
+        session.begin_nested()
+        session.add(event)
+        session.flush()
         return True
-    except IntegrityError:
+    except Exception:
+        session.rollback()
         return False
