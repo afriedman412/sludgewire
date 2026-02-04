@@ -80,6 +80,7 @@
         background: #f6f8fa;
         border-radius: 6px;
         margin-bottom: 16px;
+        margin-right: 12px;
     }
     .stat-label {
         font-size: 0.85em;
@@ -88,6 +89,65 @@
     .stat-value {
         font-size: 1.5em;
         font-weight: bold;
+    }
+    .cron-status {
+        padding: 16px;
+        background: #f6f8fa;
+        border-radius: 6px;
+        margin-bottom: 16px;
+    }
+    .cron-status.success {
+        border-left: 4px solid #28a745;
+    }
+    .cron-status.running {
+        border-left: 4px solid #ffc107;
+    }
+    .cron-status.crashed, .cron-status.completed_with_errors {
+        border-left: 4px solid #dc3545;
+    }
+    .cron-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .cron-badge {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.85em;
+        font-weight: bold;
+    }
+    .cron-badge.success {
+        background: #d4edda;
+        color: #155724;
+    }
+    .cron-badge.running {
+        background: #fff3cd;
+        color: #856404;
+    }
+    .cron-badge.crashed, .cron-badge.completed_with_errors {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    .cron-details {
+        font-size: 0.9em;
+        color: #666;
+    }
+    .cron-details dt {
+        font-weight: bold;
+        margin-top: 8px;
+    }
+    .cron-details dd {
+        margin-left: 0;
+    }
+    .cron-error {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 8px;
+        border-radius: 4px;
+        margin-top: 8px;
+        font-family: monospace;
+        font-size: 0.85em;
     }
 </style>
 {% endblock %}
@@ -103,6 +163,57 @@
         <div class="stat-label">Memory Usage</div>
         <div class="stat-value">{{ "%.1f"|format(memory_mb) }} MB</div>
     </div>
+</div>
+
+<h2>Last Cron Run</h2>
+<div class="config-section">
+    {% if last_cron_run %}
+    <div class="cron-status {{ last_cron_run.status }}">
+        <div class="cron-header">
+            <span>
+                <strong>HTTP {{ last_cron_run.http_status }}</strong>
+                &mdash; {{ last_cron_run.started_at[:19] | replace('T', ' ') }} UTC
+            </span>
+            <span class="cron-badge {{ last_cron_run.status }}">{{ last_cron_run.status | upper }}</span>
+        </div>
+        <dl class="cron-details">
+            <dt>Data Found</dt>
+            <dd>
+                F3X: {{ last_cron_run.f3x_new }} new
+                {% if last_cron_run.f3x_error %}<span style="color: #dc3545;">(error)</span>{% endif %}
+                &bull;
+                IE Events: {{ last_cron_run.ie_events_new }} new
+                {% if last_cron_run.ie_error %}<span style="color: #dc3545;">(error)</span>{% endif %}
+            </dd>
+
+            <dt>Email</dt>
+            <dd>
+                {% if last_cron_run.email_sent %}
+                    Sent to: {{ last_cron_run.emails_sent_to | join(', ') }}
+                {% else %}
+                    No email sent (no new data or no recipients)
+                {% endif %}
+            </dd>
+
+            {% if last_cron_run.completed_at %}
+            <dt>Duration</dt>
+            <dd>Completed at {{ last_cron_run.completed_at[:19] | replace('T', ' ') }} UTC</dd>
+            {% endif %}
+        </dl>
+
+        {% if last_cron_run.f3x_error %}
+        <div class="cron-error">F3X Error: {{ last_cron_run.f3x_error }}</div>
+        {% endif %}
+        {% if last_cron_run.ie_error %}
+        <div class="cron-error">IE Error: {{ last_cron_run.ie_error }}</div>
+        {% endif %}
+        {% if last_cron_run.crash_error %}
+        <div class="cron-error">Crash: {{ last_cron_run.crash_error }}</div>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">No cron runs recorded yet.</p>
+    {% endif %}
 </div>
 
 <h2>Backfill Jobs</h2>

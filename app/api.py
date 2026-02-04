@@ -14,7 +14,8 @@ from sqlmodel import Session, select, col
 
 from .settings import load_settings
 from .db import make_engine, init_db
-from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob
+from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob, AppConfig
+import json
 from .auth import verify_admin
 
 # --- App + DB bootstrap ---
@@ -316,6 +317,15 @@ def config_page(
     # Get memory usage
     memory_mb = _get_memory_usage_mb()
 
+    # Get last cron run status
+    last_cron_run = None
+    cron_config = session.get(AppConfig, "last_cron_run")
+    if cron_config and cron_config.value:
+        try:
+            last_cron_run = json.loads(cron_config.value)
+        except json.JSONDecodeError:
+            pass
+
     return templates.TemplateResponse(
         "config.html",
         {
@@ -323,6 +333,7 @@ def config_page(
             "recipients": recipients,
             "backfill_jobs": backfill_jobs,
             "memory_mb": memory_mb,
+            "last_cron_run": last_cron_run,
             "message": message,
             "message_type": message_type,
         },
@@ -654,6 +665,18 @@ def api_backfill_status(
 # Cron Endpoint
 # -------------------------
 
+def _save_cron_status(session: Session, results: dict):
+    """Save cron run results to AppConfig."""
+    config_entry = session.get(AppConfig, "last_cron_run")
+    if config_entry:
+        config_entry.value = json.dumps(results)
+        config_entry.updated_at = datetime.now(timezone.utc)
+    else:
+        config_entry = AppConfig(key="last_cron_run", value=json.dumps(results))
+    session.add(config_entry)
+    session.commit()
+
+
 @app.get("/api/cron/check-new")
 def cron_check_new(session: Session = Depends(get_session)):
     """Cron endpoint to check for new filings and send email alerts.
@@ -661,74 +684,110 @@ def cron_check_new(session: Session = Depends(get_session)):
     This endpoint is designed to be called by a scheduled task (e.g., Cloud Scheduler).
     It runs the ingestion process and sends email alerts if new filings are found.
     """
+    from fastapi.responses import JSONResponse
     from .ingest_f3x import run_f3x
     from .ingest_ie import run_ie_schedule_e
     from .email_service import send_filing_alert
 
+    started_at = datetime.now(timezone.utc)
+
     results = {
+        "started_at": started_at.isoformat(),
+        "completed_at": None,
+        "http_status": 200,
+        "status": "running",
         "f3x_new": 0,
         "ie_filings_new": 0,
         "ie_events_new": 0,
         "email_sent": False,
+        "emails_sent_to": [],
     }
 
-    # Run F3X ingestion
+    # Save "running" status immediately so we can see if it crashes mid-run
+    _save_cron_status(session, results)
+
     try:
-        f3x_count = run_f3x(
-            session,
-            feed_url=settings.f3x_feed,
-            receipts_threshold=settings.receipts_threshold,
-        )
-        results["f3x_new"] = f3x_count
-    except Exception as e:
-        results["f3x_error"] = str(e)
-
-    # Run IE Schedule E ingestion
-    try:
-        ie_filings, ie_events = run_ie_schedule_e(
-            session,
-            feed_urls=settings.ie_feeds,
-        )
-        results["ie_filings_new"] = ie_filings
-        results["ie_events_new"] = ie_events
-    except Exception as e:
-        results["ie_error"] = str(e)
-
-    # Send email alerts if new filings were found
-    if results["f3x_new"] > 0 or results["ie_events_new"] > 0:
-        # Get recent filings for the email
-        start_utc, end_utc = et_today_utc_bounds()
-
-        if results["f3x_new"] > 0:
-            stmt = (
-                select(FilingF3X)
-                .where(FilingF3X.filed_at_utc >= start_utc)
-                .where(FilingF3X.filed_at_utc < end_utc)
-                .where(FilingF3X.total_receipts >= settings.receipts_threshold)
-                .order_by(FilingF3X.filed_at_utc.desc())
-                .limit(50)
+        # Run F3X ingestion
+        try:
+            f3x_count = run_f3x(
+                session,
+                feed_url=settings.f3x_feed,
+                receipts_threshold=settings.receipts_threshold,
             )
-            f3x_filings = session.exec(stmt).all()
-            if f3x_filings:
-                filings_data = [_model_dump(f) for f in f3x_filings]
-                send_filing_alert(session, "3x", filings_data)
-                results["email_sent"] = True
+            results["f3x_new"] = f3x_count
+        except Exception as e:
+            results["f3x_error"] = str(e)
 
-        if results["ie_events_new"] > 0:
-            stmt = (
-                select(IEScheduleE)
-                .where(IEScheduleE.filed_at_utc >= start_utc)
-                .where(IEScheduleE.filed_at_utc < end_utc)
-                .order_by(IEScheduleE.filed_at_utc.desc())
-                .limit(50)
+        # Run IE Schedule E ingestion
+        try:
+            ie_filings, ie_events = run_ie_schedule_e(
+                session,
+                feed_urls=settings.ie_feeds,
             )
-            ie_events = session.exec(stmt).all()
-            if ie_events:
-                events_data = [_model_dump(e) for e in ie_events]
-                send_filing_alert(session, "e", events_data)
-                results["email_sent"] = True
+            results["ie_filings_new"] = ie_filings
+            results["ie_events_new"] = ie_events
+        except Exception as e:
+            results["ie_error"] = str(e)
 
-    return results
+        # Get active email recipients for logging
+        active_recipients = session.exec(
+            select(EmailRecipient).where(EmailRecipient.active == True)
+        ).all()
+        recipient_emails = [r.email for r in active_recipients]
+
+        # Send email alerts if new filings were found
+        if results["f3x_new"] > 0 or results["ie_events_new"] > 0:
+            start_utc, end_utc = et_today_utc_bounds()
+
+            if results["f3x_new"] > 0:
+                stmt = (
+                    select(FilingF3X)
+                    .where(FilingF3X.filed_at_utc >= start_utc)
+                    .where(FilingF3X.filed_at_utc < end_utc)
+                    .where(FilingF3X.total_receipts >= settings.receipts_threshold)
+                    .order_by(FilingF3X.filed_at_utc.desc())
+                    .limit(50)
+                )
+                f3x_filings = session.exec(stmt).all()
+                if f3x_filings:
+                    filings_data = [_model_dump(f) for f in f3x_filings]
+                    send_filing_alert(session, "3x", filings_data)
+                    results["email_sent"] = True
+                    results["emails_sent_to"] = recipient_emails
+
+            if results["ie_events_new"] > 0:
+                stmt = (
+                    select(IEScheduleE)
+                    .where(IEScheduleE.filed_at_utc >= start_utc)
+                    .where(IEScheduleE.filed_at_utc < end_utc)
+                    .order_by(IEScheduleE.filed_at_utc.desc())
+                    .limit(50)
+                )
+                ie_events = session.exec(stmt).all()
+                if ie_events:
+                    events_data = [_model_dump(e) for e in ie_events]
+                    send_filing_alert(session, "e", events_data)
+                    results["email_sent"] = True
+                    results["emails_sent_to"] = recipient_emails
+
+        # Determine final status
+        has_errors = "f3x_error" in results or "ie_error" in results
+        results["status"] = "completed_with_errors" if has_errors else "success"
+        results["http_status"] = 200  # We still return 200 for partial errors
+        results["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+        _save_cron_status(session, results)
+        return results
+
+    except Exception as e:
+        # Unexpected crash - save error state
+        results["status"] = "crashed"
+        results["http_status"] = 500
+        results["crash_error"] = str(e)
+        results["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+        _save_cron_status(session, results)
+        return JSONResponse(status_code=500, content=results)
 
 
 # -------------------------
