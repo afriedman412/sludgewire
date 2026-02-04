@@ -6,7 +6,27 @@ from typing import Optional, Dict, Any
 from sqlalchemy import select
 from sqlmodel import Session
 
-from .schemas import SeenFiling, FilingF3X, IEScheduleE
+from .schemas import SeenFiling, FilingF3X, IEScheduleE, AppConfig
+
+
+# Default values for configurable settings
+DEFAULT_MAX_NEW_PER_RUN = 50
+
+
+def get_config_int(session: Session, key: str, default: int) -> int:
+    """Get an integer config value from AppConfig table."""
+    config = session.get(AppConfig, key)
+    if config and config.value:
+        try:
+            return int(config.value)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
+def get_max_new_per_run(session: Session) -> int:
+    """Get the max filings to process per run from config."""
+    return get_config_int(session, "max_new_per_run", DEFAULT_MAX_NEW_PER_RUN)
 
 
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:

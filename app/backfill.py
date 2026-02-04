@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 from .schemas import BackfillJob, FilingF3X, IEScheduleE
 from .fec_lookup import resolve_committee_name
-from .fec_parse import download_fec_text, parse_fec_filing, extract_committee_name, sha256_hex, extract_schedule_e_best_effort
+from .fec_parse import download_fec_text, parse_fec_filing, parse_f3x_header_only, extract_committee_name, sha256_hex, extract_schedule_e_best_effort
 from .repo import claim_filing, upsert_f3x, insert_ie_event
 from .settings import load_settings
 
@@ -107,7 +107,7 @@ def backfill_date_f3x(session: Session, target_date: date) -> BackfillJob:
                 parsed = {}
                 try:
                     fec_text = download_fec_text(fec_url)
-                    parsed = parse_fec_filing(fec_text)
+                    parsed = parse_f3x_header_only(fec_text)  # Light parse - header only
                 except Exception:
                     # If we can't download, still record basic info from API
                     pass

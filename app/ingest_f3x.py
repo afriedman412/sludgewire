@@ -6,7 +6,7 @@ from sqlmodel import Session
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
 from .fec_parse import download_fec_text, parse_f3x_header_only, extract_committee_name
-from .repo import claim_filing, upsert_f3x
+from .repo import claim_filing, upsert_f3x, get_max_new_per_run
 
 
 def _log_mem(label: str):
@@ -24,20 +24,19 @@ def _log_mem(label: str):
         pass
 
 
-MAX_NEW_PER_RUN = 10  # Limit to avoid OOM on large backlogs
-
-
 def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> int:
+    max_per_run = get_max_new_per_run(session)
     items = fetch_rss_items(feed_url)
-    print(f"[F3X] RSS feed has {len(items)} items")
+    print(f"[F3X] RSS feed has {len(items)} items (max {max_per_run} per run)")
     _log_mem("after_fetch_rss")
     new_count = 0
     skipped = 0
 
     for i, item in enumerate(items):
         # Stop if we've processed enough new filings this run
-        if new_count >= MAX_NEW_PER_RUN:
-            print(f"[F3X] Reached limit of {MAX_NEW_PER_RUN} new filings, stopping")
+        if new_count >= max_per_run:
+            print(
+                f"[F3X] Reached limit of {max_per_run} new filings, stopping")
             break
         filing_id = infer_filing_id(item)
         if filing_id is None:
@@ -53,7 +52,8 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
         fec_text = download_fec_text(item.link)
         _log_mem(f"after_download_{filing_id}")
 
-        parsed = parse_f3x_header_only(fec_text)  # Light parse - header only, no fecfile
+        # Light parse - header only, no fecfile
+        parsed = parse_f3x_header_only(fec_text)
         _log_mem(f"after_parse_{filing_id}")
         total = parsed.get("filing", {}).get("col_a_total_receipts")
         if total not in (None, ""):
@@ -70,7 +70,8 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
 
         # Get committee name from DB, or insert provisional from filing
         form_name = extract_committee_name(parsed)
-        committee_name = resolve_committee_name(session, committee_id, fallback_name=form_name)
+        committee_name = resolve_committee_name(
+            session, committee_id, fallback_name=form_name)
         upsert_f3x(
             session,
             filing_id=filing_id,

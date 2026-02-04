@@ -17,6 +17,7 @@ from .db import make_engine, init_db
 from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob, AppConfig
 import json
 from .auth import verify_admin
+from .repo import DEFAULT_MAX_NEW_PER_RUN
 
 # --- App + DB bootstrap ---
 settings = load_settings()
@@ -326,6 +327,15 @@ def config_page(
         except json.JSONDecodeError:
             pass
 
+    # Get max_new_per_run setting
+    max_new_config = session.get(AppConfig, "max_new_per_run")
+    max_new_per_run = DEFAULT_MAX_NEW_PER_RUN
+    if max_new_config and max_new_config.value:
+        try:
+            max_new_per_run = int(max_new_config.value)
+        except (ValueError, TypeError):
+            pass
+
     return templates.TemplateResponse(
         "config.html",
         {
@@ -334,6 +344,7 @@ def config_page(
             "backfill_jobs": backfill_jobs,
             "memory_mb": memory_mb,
             "last_cron_run": last_cron_run,
+            "max_new_per_run": max_new_per_run,
             "message": message,
             "message_type": message_type,
         },
@@ -386,6 +397,34 @@ def delete_recipient(
 
     return RedirectResponse(
         url="/config?message=Recipient not found&message_type=error",
+        status_code=303,
+    )
+
+
+@app.post("/config/settings/max_new_per_run")
+def update_max_new_per_run(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    value: int = Form(...),
+):
+    """Update the max filings to process per run. Admin-only."""
+    # Validate the value (must be between 1 and 500)
+    if value < 1:
+        value = 1
+    elif value > 500:
+        value = 500
+
+    config = session.get(AppConfig, "max_new_per_run")
+    if config:
+        config.value = str(value)
+        config.updated_at = datetime.now(timezone.utc)
+    else:
+        config = AppConfig(key="max_new_per_run", value=str(value))
+    session.add(config)
+    session.commit()
+
+    return RedirectResponse(
+        url=f"/config?message=Max filings per run updated to {value}&message_type=success",
         status_code=303,
     )
 

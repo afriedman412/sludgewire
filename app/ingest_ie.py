@@ -6,24 +6,23 @@ from sqlmodel import Session
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
 from .fec_parse import download_fec_text, parse_fec_filing, extract_committee_name, extract_schedule_e_best_effort, sha256_hex
-from .repo import claim_filing, insert_ie_event
+from .repo import claim_filing, insert_ie_event, get_max_new_per_run
 from .schemas import IEScheduleE
 
 
-MAX_NEW_PER_RUN = 10  # Limit to avoid OOM on large backlogs
-
-
 def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, int]:
+    max_per_run = get_max_new_per_run(session)
     new_filings = 0
     new_events = 0
 
     for feed_url in feed_urls:
         items = fetch_rss_items(feed_url)
-        print(f"[IE] RSS feed {feed_url} has {len(items)} items")
+        print(f"[IE] RSS feed {feed_url} has {len(items)} items (max {max_per_run} per run)")
         for item in items:
             # Stop if we've processed enough new filings this run
-            if new_filings >= MAX_NEW_PER_RUN:
-                print(f"[IE] Reached limit of {MAX_NEW_PER_RUN} new filings, stopping")
+            if new_filings >= max_per_run:
+                print(
+                    f"[IE] Reached limit of {max_per_run} new filings, stopping")
                 break
             filing_id = infer_filing_id(item)
             if filing_id is None:
@@ -42,7 +41,8 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
 
             # Get committee name from DB, or insert provisional from filing
             form_name = extract_committee_name(parsed)
-            committee_name = resolve_committee_name(session, committee_id, fallback_name=form_name)
+            committee_name = resolve_committee_name(
+                session, committee_id, fallback_name=form_name)
 
             # Pass pre-parsed dict to avoid double-parsing
             for raw_line, fields in extract_schedule_e_best_effort(fec_text, parsed=parsed):
@@ -86,7 +86,7 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
             new_filings += 1
 
         # Break outer loop too if limit reached
-        if new_filings >= MAX_NEW_PER_RUN:
+        if new_filings >= max_per_run:
             break
 
     return new_filings, new_events

@@ -165,6 +165,20 @@
     </div>
 </div>
 
+<h2>Ingestion Settings</h2>
+<div class="config-section">
+    <form method="POST" action="/config/settings/max_new_per_run">
+        <div class="form-row">
+            <label for="max_new_per_run" style="flex: 0 0 auto; padding: 8px 0;">Max filings per run:</label>
+            <input type="number" name="value" id="max_new_per_run" value="{{ max_new_per_run }}" min="1" max="500" style="width: 100px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+            <button type="submit">Update</button>
+        </div>
+        <p class="muted" style="font-size: 0.85em; margin-top: 8px;">
+            Limits how many new filings are processed per cron run to avoid memory issues. (1-500)
+        </p>
+    </form>
+</div>
+
 <h2>Last Cron Run</h2>
 <div class="config-section">
     {% if last_cron_run %}
