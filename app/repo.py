@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from .schemas import SeenFiling, FilingF3X, IEScheduleE, AppConfig, SkippedFiling

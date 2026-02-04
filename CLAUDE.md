@@ -2,6 +2,18 @@
 
 FastAPI application that monitors FEC filings (F3X and Schedule E) and provides dashboards and email alerts.
 
+## GCP Deployment
+
+All resources are in the **freeway-2026** GCP project:
+- **Service**: `fec-monitor` (Cloud Run)
+- **Job**: `fec-ingest-job` (Cloud Run Job)
+- **Cron**: `fec-ingest-job-trigger` (Cloud Scheduler)
+- **Database**: `fec-db` (Cloud SQL Postgres)
+  - User: `fec`
+  - Password: `dkDoB85i6u`
+
+Note: Other resources in this project are outdated and no longer relevant.
+
 ## Project Structure
 
 ```
