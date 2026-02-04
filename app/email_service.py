@@ -115,19 +115,31 @@ def send_filing_alert(
         for f in filings:
             total = f.get("total_receipts")
             total_str = f"${total:,.2f}" if total else "N/A"
+            committee_id = f.get('committee_id', '')
+            committee_name = f.get('committee_name') or committee_id or 'N/A'
+            committee_link = f'<a href="https://www.fec.gov/data/committee/{committee_id}/">{committee_name}</a>' if committee_id else committee_name
+            coverage = f"{f.get('coverage_from', '')} → {f.get('coverage_through', '')}" if f.get('coverage_from') else "N/A"
             rows_html += f"""
             <tr>
-                <td>{f.get('committee_name', f.get('committee_id', 'N/A'))}</td>
-                <td>{total_str}</td>
-                <td><a href="{f.get('fec_url', '#')}">View</a></td>
+                <td>{f.get('filed_at_utc', 'N/A')}</td>
+                <td>{committee_link}</td>
+                <td>{f.get('form_type', 'N/A')}</td>
+                <td>{f.get('report_type', 'N/A')}</td>
+                <td>{coverage}</td>
+                <td style="text-align: right;">{total_str}</td>
+                <td><a href="{f.get('fec_url', '#')}">.fec</a></td>
             </tr>
             """
         table_html = f"""
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; font-size: 14px;">
             <tr style="background: #f6f6f6;">
+                <th>Filed (UTC)</th>
                 <th>Committee</th>
+                <th>Form</th>
+                <th>Report</th>
+                <th>Coverage</th>
                 <th>Total Receipts</th>
-                <th>Filing</th>
+                <th>Raw</th>
             </tr>
             {rows_html}
         </table>
@@ -137,21 +149,45 @@ def send_filing_alert(
         for f in filings:
             amount = f.get("amount")
             amount_str = f"${amount:,.2f}" if amount else "N/A"
+            committee_id = f.get('committee_id', '')
+            committee_name = f.get('committee_name') or committee_id or 'N/A'
+            committee_link = f'<a href="https://www.fec.gov/data/committee/{committee_id}/">{committee_name}</a>' if committee_id else committee_name
+            candidate_id = f.get('candidate_id', '')
+            candidate_name = f.get('candidate_name') or 'N/A'
+            candidate_link = f'<a href="https://www.fec.gov/data/candidate/{candidate_id}/">{candidate_name}</a>' if candidate_id else candidate_name
+            # Format office as "H-CA-12" or "S-TX" or "P"
+            office = f.get('candidate_office', '')
+            state = f.get('candidate_state', '')
+            district = f.get('candidate_district', '')
+            office_parts = [p for p in [office, state, district] if p]
+            office_str = '-'.join(office_parts) if office_parts else ''
+            so = f.get('support_oppose', '')
+            so_style = 'color: #28a745; font-weight: bold;' if so == 'S' else 'color: #dc3545; font-weight: bold;' if so == 'O' else ''
             rows_html += f"""
             <tr>
-                <td>{f.get('committee_name', f.get('committee_id', 'N/A'))}</td>
-                <td>{f.get('support_oppose', 'N/A')}</td>
-                <td>{amount_str}</td>
-                <td>{f.get('candidate_name', 'N/A')}</td>
+                <td>{committee_link}</td>
+                <td>{candidate_link}</td>
+                <td>{office_str or ''}</td>
+                <td style="{so_style}">{so or 'N/A'}</td>
+                <td>{f.get('purpose', '') or ''}</td>
+                <td>{f.get('payee_name', '') or ''}</td>
+                <td>{f.get('expenditure_date', '') or ''}</td>
+                <td style="text-align: right;">{amount_str}</td>
+                <td><a href="{f.get('fec_url', '#')}">.fec</a></td>
             </tr>
             """
         table_html = f"""
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; font-size: 14px;">
             <tr style="background: #f6f6f6;">
-                <th>Committee</th>
-                <th>S/O</th>
-                <th>Amount</th>
+                <th>Spender</th>
                 <th>Candidate</th>
+                <th>Office</th>
+                <th>S/O</th>
+                <th>Purpose</th>
+                <th>Payee</th>
+                <th>Exp. Date</th>
+                <th>Amount</th>
+                <th>Raw</th>
             </tr>
             {rows_html}
         </table>

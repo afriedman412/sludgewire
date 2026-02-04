@@ -64,7 +64,7 @@
         {% for r in rows %}
         <tr>
             <td>{{ r.filed_at_utc }}</td>
-            <td>{{ r.committee_id }}</td>
+            <td><a href="https://www.fec.gov/data/committee/{{ r.committee_id }}/" target="_blank" rel="noreferrer">{{ r.committee_id }}</a></td>
             <td>{{ r.committee_name or "" }}</td>
             <td>{{ r.form_type }}</td>
             <td>{{ r.report_type }}</td>

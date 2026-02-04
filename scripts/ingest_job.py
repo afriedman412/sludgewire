@@ -150,6 +150,11 @@ def run_job():
                             filings_data = [{
                                 "committee_name": f.committee_name,
                                 "committee_id": f.committee_id,
+                                "form_type": f.form_type,
+                                "report_type": f.report_type,
+                                "coverage_from": str(f.coverage_from) if f.coverage_from else None,
+                                "coverage_through": str(f.coverage_through) if f.coverage_through else None,
+                                "filed_at_utc": str(f.filed_at_utc)[:16] if f.filed_at_utc else None,
                                 "total_receipts": f.total_receipts,
                                 "fec_url": f.fec_url,
                             } for f in f3x_filings]
@@ -175,11 +180,17 @@ def run_job():
                             events_data = [{
                                 "committee_name": e.committee_name,
                                 "committee_id": e.committee_id,
-                                "support_oppose": e.support_oppose,
-                                "amount": e.amount,
                                 "candidate_name": e.candidate_name,
+                                "candidate_id": e.candidate_id,
+                                "candidate_office": e.candidate_office,
+                                "candidate_state": e.candidate_state,
+                                "candidate_district": e.candidate_district,
+                                "support_oppose": e.support_oppose,
                                 "purpose": e.purpose,
                                 "payee_name": e.payee_name,
+                                "expenditure_date": str(e.expenditure_date) if e.expenditure_date else None,
+                                "amount": e.amount,
+                                "fec_url": e.fec_url,
                             } for e in ie_events_list]
                             send_filing_alert(session, "e", events_data)
                             # Mark as emailed

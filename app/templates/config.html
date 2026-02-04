@@ -240,8 +240,30 @@
     {% endif %}
 </div>
 
-<h2>Backfill Jobs</h2>
+<h2>Backfill Historical Data</h2>
 <div class="config-section">
+    <form method="POST" action="" id="backfill-form">
+        <div class="form-row">
+            <input type="date" name="date" id="backfill-date" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+            <select name="type" id="backfill-type" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="3x">F3X</option>
+                <option value="e">Schedule E</option>
+            </select>
+            <button type="submit">Start Backfill</button>
+        </div>
+    </form>
+    <script>
+        document.getElementById('backfill-form').addEventListener('submit', function(e) {
+            var date = document.getElementById('backfill-date').value;
+            var type = document.getElementById('backfill-type').value;
+            if (date) {
+                var parts = date.split('-');
+                this.action = '/config/backfill/' + parts[0] + '/' + parseInt(parts[1]) + '/' + parseInt(parts[2]) + '/' + type;
+            }
+        });
+    </script>
+
+    <h3>Active Jobs</h3>
     {% if backfill_jobs %}
     {% for job in backfill_jobs %}
     <div class="job-row">

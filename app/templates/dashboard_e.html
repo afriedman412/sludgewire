@@ -53,6 +53,7 @@
             <th>Spender</th>
             <th>Spender ID</th>
             <th>Candidate</th>
+            <th>Office</th>
             <th>S/O</th>
             <th>Purpose</th>
             <th>Payee</th>
@@ -66,8 +67,19 @@
         {% for r in rows %}
         <tr>
             <td>{{ r.committee_name or "" }}</td>
-            <td>{{ r.committee_id or r.filer_id or "" }}</td>
-            <td>{{ r.candidate_name or "" }}</td>
+            <td>
+                {% if r.committee_id or r.filer_id %}
+                <a href="https://www.fec.gov/data/committee/{{ r.committee_id or r.filer_id }}/" target="_blank" rel="noreferrer">{{ r.committee_id or r.filer_id }}</a>
+                {% endif %}
+            </td>
+            <td>
+                {% if r.candidate_id %}
+                <a href="https://www.fec.gov/data/candidate/{{ r.candidate_id }}/" target="_blank" rel="noreferrer">{{ r.candidate_name or r.candidate_id }}</a>
+                {% else %}
+                {{ r.candidate_name or "" }}
+                {% endif %}
+            </td>
+            <td>{{ [r.candidate_office, r.candidate_state, r.candidate_district]|select|join('-') }}</td>
             <td class="{{ 'support' if r.support_oppose == 'S' else 'oppose' if r.support_oppose == 'O' else '' }}">
                 {{ r.support_oppose or "" }}
             </td>
@@ -86,7 +98,7 @@
         {% endfor %}
         {% else %}
         <tr>
-            <td colspan="9">No Schedule E events found.</td>
+            <td colspan="10">No Schedule E events found.</td>
         </tr>
         {% endif %}
     </tbody>
