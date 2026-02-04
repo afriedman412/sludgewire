@@ -24,6 +24,9 @@ def _log_mem(label: str):
         pass
 
 
+MAX_NEW_PER_RUN = 10  # Limit to avoid OOM on large backlogs
+
+
 def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> int:
     items = fetch_rss_items(feed_url)
     print(f"[F3X] RSS feed has {len(items)} items")
@@ -32,6 +35,10 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
     skipped = 0
 
     for i, item in enumerate(items):
+        # Stop if we've processed enough new filings this run
+        if new_count >= MAX_NEW_PER_RUN:
+            print(f"[F3X] Reached limit of {MAX_NEW_PER_RUN} new filings, stopping")
+            break
         filing_id = infer_filing_id(item)
         if filing_id is None:
             continue

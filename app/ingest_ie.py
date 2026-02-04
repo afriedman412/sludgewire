@@ -10,13 +10,21 @@ from .repo import claim_filing, insert_ie_event
 from .schemas import IEScheduleE
 
 
+MAX_NEW_PER_RUN = 10  # Limit to avoid OOM on large backlogs
+
+
 def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, int]:
     new_filings = 0
     new_events = 0
 
     for feed_url in feed_urls:
         items = fetch_rss_items(feed_url)
+        print(f"[IE] RSS feed {feed_url} has {len(items)} items")
         for item in items:
+            # Stop if we've processed enough new filings this run
+            if new_filings >= MAX_NEW_PER_RUN:
+                print(f"[IE] Reached limit of {MAX_NEW_PER_RUN} new filings, stopping")
+                break
             filing_id = infer_filing_id(item)
             if filing_id is None:
                 continue
@@ -76,5 +84,9 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
             gc.collect()
 
             new_filings += 1
+
+        # Break outer loop too if limit reached
+        if new_filings >= MAX_NEW_PER_RUN:
+            break
 
     return new_filings, new_events
