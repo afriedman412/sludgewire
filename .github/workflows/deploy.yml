@@ -35,8 +35,10 @@ jobs:
       - name: Build and Push Docker image
         run: |
           IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
-          docker build -t $IMAGE_TAG .
+          IMAGE_LATEST="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}/${{ env.SERVICE_NAME }}:latest"
+          docker build -t $IMAGE_TAG -t $IMAGE_LATEST .
           docker push $IMAGE_TAG
+          docker push $IMAGE_LATEST
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
       - name: Deploy to Cloud Run
@@ -71,7 +73,7 @@ jobs:
             --set-env-vars "CONFIG_PASSWORD=${{ secrets.CONFIG_PASSWORD }}" \
             --set-env-vars "GOV_API_KEY=${{ secrets.GOV_API_KEY }}" \
             --add-cloudsql-instances ${{ secrets.CLOUD_SQL_CONNECTION }} \
-            --memory 8Gi
+            --memory 4Gi
 
       - name: Show deployment URL
         run: |
