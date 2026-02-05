@@ -59,6 +59,20 @@ jobs:
             --max-instances 10 \
             --no-cpu-throttling
 
+      - name: Update Cloud Run Job
+        run: |
+          gcloud run jobs update fec-ingest-job \
+            --image ${{ env.IMAGE_TAG }} \
+            --region ${{ env.REGION }} \
+            --set-env-vars "MODE=job" \
+            --set-env-vars "POSTGRES_URL=${{ secrets.POSTGRES_URL }}" \
+            --set-env-vars "GOOGLE_APP_PW=${{ secrets.GOOGLE_APP_PW }}" \
+            --set-env-vars "EMAIL_FROM=${{ secrets.EMAIL_FROM }}" \
+            --set-env-vars "CONFIG_PASSWORD=${{ secrets.CONFIG_PASSWORD }}" \
+            --set-env-vars "GOV_API_KEY=${{ secrets.GOV_API_KEY }}" \
+            --add-cloudsql-instances ${{ secrets.CLOUD_SQL_CONNECTION }} \
+            --memory 8Gi
+
       - name: Show deployment URL
         run: |
           gcloud run services describe ${{ env.SERVICE_NAME }} \
