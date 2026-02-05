@@ -763,7 +763,6 @@ def cron_check_new(session: Session = Depends(get_session)):
     from fastapi.responses import JSONResponse
     from .ingest_f3x import run_f3x
     from .ingest_ie import run_ie_schedule_e
-    from .email_service import send_filing_alert
 
     started_at = datetime.now(timezone.utc)
 
@@ -815,67 +814,8 @@ def cron_check_new(session: Session = Depends(get_session)):
         gc.collect()
         _log_memory("after_ie_gc", results)
 
-        # Get active email recipients for logging
-        active_recipients = session.exec(
-            select(EmailRecipient).where(EmailRecipient.active == True)
-        ).all()
-        recipient_emails = [r.email for r in active_recipients]
-
-        _log_memory("before_email_check", results)
-
-        # Send email alerts if new filings were found (and emails enabled)
-        email_enabled = get_email_enabled(session)
-        if not email_enabled:
-            print("[CRON] Email alerts disabled in config")
-
-        if email_enabled and (results["f3x_new"] > 0 or results["ie_events_new"] > 0):
-            start_utc, end_utc = et_today_utc_bounds()
-
-            if results["f3x_new"] > 0:
-                stmt = (
-                    select(FilingF3X)
-                    .where(FilingF3X.filed_at_utc >= start_utc)
-                    .where(FilingF3X.filed_at_utc < end_utc)
-                    .where(FilingF3X.total_receipts >= settings.receipts_threshold)
-                    .order_by(FilingF3X.filed_at_utc.desc())
-                    .limit(50)
-                )
-                f3x_filings = session.exec(stmt).all()
-                if f3x_filings:
-                    # Only include fields needed for email (avoid large raw_meta)
-                    filings_data = [{
-                        "committee_name": f.committee_name,
-                        "committee_id": f.committee_id,
-                        "total_receipts": f.total_receipts,
-                        "fec_url": f.fec_url,
-                    } for f in f3x_filings]
-                    send_filing_alert(session, "3x", filings_data)
-                    results["email_sent"] = True
-                    results["emails_sent_to"] = recipient_emails
-
-            if results["ie_events_new"] > 0:
-                stmt = (
-                    select(IEScheduleE)
-                    .where(IEScheduleE.filed_at_utc >= start_utc)
-                    .where(IEScheduleE.filed_at_utc < end_utc)
-                    .order_by(IEScheduleE.filed_at_utc.desc())
-                    .limit(50)
-                )
-                ie_events = session.exec(stmt).all()
-                if ie_events:
-                    # Only include fields needed for email (avoid large raw_line)
-                    events_data = [{
-                        "committee_name": e.committee_name,
-                        "committee_id": e.committee_id,
-                        "support_oppose": e.support_oppose,
-                        "amount": e.amount,
-                        "candidate_name": e.candidate_name,
-                        "purpose": e.purpose,
-                        "payee_name": e.payee_name,
-                    } for e in ie_events]
-                    send_filing_alert(session, "e", events_data)
-                    results["email_sent"] = True
-                    results["emails_sent_to"] = recipient_emails
+        # NOTE: Email alerts are handled by the ingest job (scripts/ingest_job.py),
+        # not this cron endpoint. The job uses emailed_at tracking to avoid duplicates.
 
         # Determine final status
         has_errors = "f3x_error" in results or "ie_error" in results
