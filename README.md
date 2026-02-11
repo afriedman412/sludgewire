@@ -107,5 +107,5 @@ uvicorn app.main:app --reload --port 5000
 PYTHONPATH=. python -m scripts.ingest_job
 
 # Connect to Cloud SQL via proxy
-cloud-sql-proxy freeway-2026:us-central1:fec-db --port=5433
+cloud-sql-proxy freeway2026:us-central1:fec-db --port=5433
 ```

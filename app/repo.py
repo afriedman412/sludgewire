@@ -74,13 +74,30 @@ def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
 
     try:
         session.begin_nested()
-        session.add(SeenFiling(filing_id=filing_id, source_feed=source_feed))
+        session.add(SeenFiling(
+            filing_id=filing_id,
+            source_feed=source_feed,
+            status="claimed",
+        ))
         session.flush()
         return True
     except Exception:
         # Duplicate or other error - rollback the savepoint and continue
         session.rollback()
         return False
+
+
+def update_filing_status(
+    session: Session,
+    filing_id: int,
+    source_feed: str,
+    status: str,
+) -> None:
+    """Update the status of a seen filing."""
+    row = session.get(SeenFiling, (filing_id, source_feed))
+    if row:
+        row.status = status
+        session.add(row)
 
 
 def upsert_f3x(

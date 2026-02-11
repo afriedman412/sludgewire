@@ -46,6 +46,7 @@ class SeenFiling(SQLModel, table=True):
 
     filing_id: int = Field(sa_column=Column(BigInteger))
     source_feed: str = Field(default="")
+    status: str = Field(default="claimed", index=True)  # claimed, ingested, failed, skipped
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
 
 

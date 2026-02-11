@@ -10,7 +10,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(gcloud:*)",
       "Bash(tac:*)",
-      "Bash(curl -s -X POST \"https://fec-monitor-488806426932.us-central1.run.app/config/settings/email_enabled\" -u \":ilyas0va\" -d \"enabled=false\" -L)"
+      "Bash(curl -s -X POST \"https://fec-monitor-488806426932.us-central1.run.app/config/settings/email_enabled\" -u \":ilyas0va\" -d \"enabled=false\" -L)",
+      "Bash(psql:*)"
     ]
   }
 }

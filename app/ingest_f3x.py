@@ -7,7 +7,7 @@ from sqlmodel import Session
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
 from .fec_parse import download_fec_text, parse_f3x_header_only, extract_committee_name, FileTooLargeError
-from .repo import claim_filing, upsert_f3x, get_max_new_per_run, record_skipped_filing
+from .repo import claim_filing, update_filing_status, upsert_f3x, get_max_new_per_run, record_skipped_filing
 
 MAX_FILE_SIZE_MB = 50  # Skip files larger than this
 
@@ -66,44 +66,54 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
                 session, filing_id, "too_large",
                 file_size_mb=e.size_mb, fec_url=item.link
             )
+            update_filing_status(
+                session, filing_id, "F3X", "skipped")
             continue
         _log_mem(f"after_download_{filing_id}")
 
-        # Light parse - header only, no fecfile
-        parsed = parse_f3x_header_only(fec_text)
-        _log_mem(f"after_parse_{filing_id}")
-        total = parsed.get("filing", {}).get("col_a_total_receipts")
-        if total not in (None, ""):
-            try:
-                total = float(total)
-            except (TypeError, ValueError):
+        try:
+            # Light parse - header only, no fecfile
+            parsed = parse_f3x_header_only(fec_text)
+            _log_mem(f"after_parse_{filing_id}")
+            total = parsed.get("filing", {}).get("col_a_total_receipts")
+            if total not in (None, ""):
+                try:
+                    total = float(total)
+                except (TypeError, ValueError):
+                    total = None
+            else:
                 total = None
-        else:
-            total = None
-        threshold_flag = (total is not None and total >= receipts_threshold)
+            threshold_flag = (total is not None and total >= receipts_threshold)
 
-        meta = item.meta
-        committee_id = meta.get("CommitteeId") or ""
+            meta = item.meta
+            committee_id = meta.get("CommitteeId") or ""
 
-        # Get committee name from DB, or insert provisional from filing
-        form_name = extract_committee_name(parsed)
-        committee_name = resolve_committee_name(
-            session, committee_id, fallback_name=form_name)
-        upsert_f3x(
-            session,
-            filing_id=filing_id,
-            committee_id=committee_id,
-            committee_name=committee_name,
-            form_type=meta.get("FormType"),
-            report_type=meta.get("ReportType"),
-            coverage_from=parse_mmddyyyy(meta.get("CoverageFrom")),
-            coverage_through=parse_mmddyyyy(meta.get("CoverageThrough")),
-            filed_at_utc=item.pub_date_utc,
-            fec_url=item.link,
-            total_receipts=total,
-            threshold_flag=threshold_flag,
-            raw_meta=meta,
-        )
+            # Get committee name from DB, or insert provisional from filing
+            form_name = extract_committee_name(parsed)
+            committee_name = resolve_committee_name(
+                session, committee_id, fallback_name=form_name)
+            upsert_f3x(
+                session,
+                filing_id=filing_id,
+                committee_id=committee_id,
+                committee_name=committee_name,
+                form_type=meta.get("FormType"),
+                report_type=meta.get("ReportType"),
+                coverage_from=parse_mmddyyyy(meta.get("CoverageFrom")),
+                coverage_through=parse_mmddyyyy(meta.get("CoverageThrough")),
+                filed_at_utc=item.pub_date_utc,
+                fec_url=item.link,
+                total_receipts=total,
+                threshold_flag=threshold_flag,
+                raw_meta=meta,
+            )
+            update_filing_status(
+                session, filing_id, "F3X", "ingested")
+        except Exception as e:
+            print(f"[F3X] Failed to process {filing_id}: {e}")
+            update_filing_status(
+                session, filing_id, "F3X", "failed")
+            continue
 
         # Explicit cleanup to free memory
         del fec_text
