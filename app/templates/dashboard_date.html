@@ -72,16 +72,26 @@
 {% block content %}
 <h2>{{ filing_type_label }} - {{ target_date }}</h2>
 
+{% if filing_type == '3x' and threshold is defined %}
+<div style="margin-bottom: 12px;">
+    {% if threshold > 0 %}
+    <a href="/{{ target_date.year }}/{{ '%02d' % target_date.month }}/{{ '%02d' % target_date.day }}/3x?threshold=0">Show All Filings</a> | <strong>Big Filers Only</strong>
+    {% else %}
+    <strong>All Filings</strong> | <a href="/{{ target_date.year }}/{{ '%02d' % target_date.month }}/{{ '%02d' % target_date.day }}/3x?threshold=50000">Big Filers Only</a>
+    {% endif %}
+</div>
+{% endif %}
+
 <div class="date-nav">
-    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/{{ filing_type }}">&larr; Previous Day</a>
+    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/{{ filing_type }}{% if filing_type == '3x' and threshold is defined %}?threshold={{ threshold | int }}{% endif %}">&larr; Previous Day</a>
     <span class="date-display">{{ target_date.strftime('%B %d, %Y') }}</span>
     {% if next_date <= today %}
-    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/{{ filing_type }}">Next Day &rarr;</a>
+    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/{{ filing_type }}{% if filing_type == '3x' and threshold is defined %}?threshold={{ threshold | int }}{% endif %}">Next Day &rarr;</a>
     {% else %}
     <span class="muted">Next Day &rarr;</span>
     {% endif %}
     {% if target_date != today %}
-    <a href="/dashboard/{{ filing_type }}">Today</a>
+    <a href="/dashboard/{{ filing_type }}{% if filing_type == '3x' and threshold is defined %}?threshold={{ threshold | int }}{% endif %}">Today</a>
     {% endif %}
 </div>
 

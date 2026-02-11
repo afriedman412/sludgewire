@@ -101,11 +101,11 @@ def dashboard_3x(
         select(FilingF3X)
         .where(FilingF3X.filed_at_utc >= start_utc)
         .where(FilingF3X.filed_at_utc < end_utc)
-        .where(FilingF3X.total_receipts != None)  # noqa: E711
-        .where(FilingF3X.total_receipts >= threshold)
-        .order_by(FilingF3X.filed_at_utc.desc())
-        .limit(limit)
     )
+    if threshold > 0:
+        stmt = stmt.where(FilingF3X.total_receipts != None)  # noqa: E711
+        stmt = stmt.where(FilingF3X.total_receipts >= threshold)
+    stmt = stmt.order_by(FilingF3X.filed_at_utc.desc()).limit(limit)
     rows = session.exec(stmt).all()
 
     return templates.TemplateResponse(
@@ -362,6 +362,7 @@ def add_recipient(
     session: Session = Depends(get_session),
     _: str = Depends(verify_admin),
     email: str = Form(...),
+    committee_ids: str = Form(default=""),
 ):
     """Add a new email recipient."""
     existing = session.exec(
@@ -374,12 +375,42 @@ def add_recipient(
             status_code=303,
         )
 
-    recipient = EmailRecipient(email=email, active=True)
+    # Parse comma-separated committee IDs (empty string = all committees)
+    cids = [c.strip() for c in committee_ids.split(",") if c.strip()] or None
+
+    recipient = EmailRecipient(email=email, active=True, committee_ids=cids)
     session.add(recipient)
     session.commit()
 
     return RedirectResponse(
         url="/config?message=Recipient added&message_type=success",
+        status_code=303,
+    )
+
+
+@app.post("/config/recipients/{recipient_id}/committees")
+def update_recipient_committees(
+    recipient_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    committee_ids: str = Form(default=""),
+):
+    """Update committee filter for an email recipient."""
+    recipient = session.get(EmailRecipient, recipient_id)
+    if not recipient:
+        return RedirectResponse(
+            url="/config?message=Recipient not found&message_type=error",
+            status_code=303,
+        )
+
+    cids = [c.strip() for c in committee_ids.split(",") if c.strip()] or None
+    recipient.committee_ids = cids
+    session.add(recipient)
+    session.commit()
+
+    label = ", ".join(cids) if cids else "all committees"
+    return RedirectResponse(
+        url=f"/config?message=Updated filter for {recipient.email} to {label}&message_type=success",
         status_code=303,
     )
 
@@ -595,6 +626,7 @@ def dashboard_date_3x(
     month: int,
     day: int,
     session: Session = Depends(get_session),
+    threshold: float = Query(default=50_000, ge=0),
     limit: int = Query(default=500, ge=1, le=5000),
 ):
     """Date-based F3X dashboard. Backfill must be triggered manually via /config."""
@@ -614,19 +646,22 @@ def dashboard_date_3x(
     # Check backfill status (but don't auto-trigger)
     backfill_job = get_backfill_status(session, target_date, "3x")
 
-    # Query filings for this date - always filter by receipts threshold
-    threshold = settings.receipts_threshold
     start_utc, end_utc = _date_utc_bounds(target_date)
     stmt = (
         select(FilingF3X)
         .where(FilingF3X.filed_at_utc >= start_utc)
         .where(FilingF3X.filed_at_utc < end_utc)
-        .where(FilingF3X.total_receipts != None)  # noqa: E711
-        .where(FilingF3X.total_receipts >= threshold)
-        .order_by(FilingF3X.filed_at_utc.desc())
-        .limit(limit)
     )
+    if threshold > 0:
+        stmt = stmt.where(FilingF3X.total_receipts != None)  # noqa: E711
+        stmt = stmt.where(FilingF3X.total_receipts >= threshold)
+    stmt = stmt.order_by(FilingF3X.filed_at_utc.desc()).limit(limit)
     rows = session.exec(stmt).all()
+
+    if threshold > 0:
+        label = f"F3X Filings (≥${threshold:,.0f})"
+    else:
+        label = "F3X Filings (All)"
 
     return templates.TemplateResponse(
         "dashboard_date.html",
@@ -638,8 +673,9 @@ def dashboard_date_3x(
             "next_date": target_date + timedelta(days=1),
             "today": today,
             "nav_date": target_date,
+            "threshold": threshold,
             "filing_type": "3x",
-            "filing_type_label": f"F3X Filings (≥${threshold:,.0f})",
+            "filing_type_label": label,
             "backfill_job": backfill_job,
         },
     )

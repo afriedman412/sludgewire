@@ -195,12 +195,20 @@
     <div class="cron-status {{ last_cron_run.status }}">
         <div class="cron-header">
             <span>
+                {% if last_cron_run.source == 'cloud_run_job' %}
+                <strong>Cloud Run Job</strong>
+                {% else %}
                 <strong>HTTP {{ last_cron_run.http_status }}</strong>
+                {% endif %}
                 &mdash; {{ last_cron_run.started_at[:19] | replace('T', ' ') }} UTC
             </span>
             <span class="cron-badge {{ last_cron_run.status }}">{{ last_cron_run.status | upper }}</span>
         </div>
         <dl class="cron-details">
+            {% if last_cron_run.iterations is defined and last_cron_run.iterations %}
+            <dt>Iterations</dt>
+            <dd>{{ last_cron_run.iterations }}</dd>
+            {% endif %}
             <dt>Data Found</dt>
             <dd>
                 F3X: {{ last_cron_run.f3x_new }} new
@@ -289,18 +297,25 @@
             <input type="email" name="email" placeholder="email@example.com" required />
             <button type="submit">Add Recipient</button>
         </div>
+        <div class="form-row">
+            <input type="text" name="committee_ids" placeholder="Committee IDs (comma-separated, blank = all)" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+        </div>
     </form>
 
     <h3>Current Recipients</h3>
     {% if recipients %}
     {% for r in recipients %}
-    <div class="recipient-row">
+    <div class="recipient-row" style="flex-wrap: wrap;">
         <span class="recipient-email">{{ r.email }}</span>
         <span class="recipient-status {{ 'active' if r.active else 'inactive' }}">
             {{ 'Active' if r.active else 'Inactive' }}
         </span>
         <form method="POST" action="/config/recipients/{{ r.id }}/delete" style="margin: 0;">
             <button type="submit" class="delete-btn">Remove</button>
+        </form>
+        <form method="POST" action="/config/recipients/{{ r.id }}/committees" style="margin: 0; display: flex; gap: 8px; width: 100%; margin-top: 4px;">
+            <input type="text" name="committee_ids" value="{{ r.committee_ids | join(', ') if r.committee_ids else '' }}" placeholder="All committees" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em;" />
+            <button type="submit" style="padding: 6px 12px; background: #0366d6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">Save Filter</button>
         </form>
     </div>
     {% endfor %}

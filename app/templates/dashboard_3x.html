@@ -29,14 +29,26 @@
 
 {% block content %}
 <h2>
-    F3X Filings (≥{{ threshold | round | int | string | replace(",", "") | int | format_currency }})
+    {% if threshold > 0 %}
+    F3X Filings (≥${{ "{:,.0f}".format(threshold) }})
+    {% else %}
+    F3X Filings (All)
+    {% endif %}
 </h2>
 
+<div style="margin-bottom: 12px;">
+    {% if threshold > 0 %}
+    <a href="/dashboard/3x?threshold=0">Show All Filings</a> | <strong>Big Filers Only</strong>
+    {% else %}
+    <strong>All Filings</strong> | <a href="/dashboard/3x?threshold=50000">Big Filers Only</a>
+    {% endif %}
+</div>
+
 <div class="date-nav">
-    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/3x">&larr; Previous Day</a>
+    <a href="/{{ prev_date.year }}/{{ '%02d' % prev_date.month }}/{{ '%02d' % prev_date.day }}/3x?threshold={{ threshold | int }}">&larr; Previous Day</a>
     <span class="date-display">{{ day_et.strftime('%B %d, %Y') }}</span>
     {% if next_date <= today %}
-    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/3x">Next Day &rarr;</a>
+    <a href="/{{ next_date.year }}/{{ '%02d' % next_date.month }}/{{ '%02d' % next_date.day }}/3x?threshold={{ threshold | int }}">Next Day &rarr;</a>
     {% else %}
     <span class="muted">Next Day &rarr;</span>
     {% endif %}
@@ -69,7 +81,7 @@
             <td>{{ r.form_type }}</td>
             <td>{{ r.report_type }}</td>
             <td>{{ r.coverage_from }} → {{ r.coverage_through }}</td>
-            <td class="money">${{ "{:,.2f}".format(r.total_receipts) }}</td>
+            <td class="money">{% if r.total_receipts is not none %}${{ "{:,.2f}".format(r.total_receipts) }}{% else %}N/A{% endif %}</td>
             <td>
                 <a href="{{ r.fec_url }}" target="_blank" rel="noreferrer">.fec</a>
             </td>
