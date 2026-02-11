@@ -40,8 +40,13 @@
     <body>
         <h1>FEC Monitor</h1>
         <nav style="margin-bottom: 16px;">
+            {% if nav_date %}
+            <a href="/{{ nav_date.year }}/{{ '%02d' % nav_date.month }}/{{ '%02d' % nav_date.day }}/3x">3X Dashboard</a> |
+            <a href="/{{ nav_date.year }}/{{ '%02d' % nav_date.month }}/{{ '%02d' % nav_date.day }}/e">Schedule E Dashboard</a> |
+            {% else %}
             <a href="/dashboard/3x">3X Dashboard</a> |
             <a href="/dashboard/e">Schedule E Dashboard</a> |
+            {% endif %}
             <a href="/config">Config</a>
         </nav>
 

@@ -118,6 +118,7 @@ def dashboard_3x(
             "prev_date": today - timedelta(days=1),
             "next_date": today + timedelta(days=1),
             "today": today,
+            "nav_date": today,
             "api_url": f"/api/3x/today?threshold={threshold}&limit={limit}",
         },
     )
@@ -157,6 +158,7 @@ def dashboard_e(
             "prev_date": today - timedelta(days=1),
             "next_date": today + timedelta(days=1),
             "today": today,
+            "nav_date": today,
             "api_url": f"/api/e/today?limit={limit}",
         },
     )
@@ -635,6 +637,7 @@ def dashboard_date_3x(
             "prev_date": target_date - timedelta(days=1),
             "next_date": target_date + timedelta(days=1),
             "today": today,
+            "nav_date": target_date,
             "filing_type": "3x",
             "filing_type_label": f"F3X Filings (≥${threshold:,.0f})",
             "backfill_job": backfill_job,
@@ -688,6 +691,7 @@ def dashboard_date_e(
             "prev_date": target_date - timedelta(days=1),
             "next_date": target_date + timedelta(days=1),
             "today": today,
+            "nav_date": target_date,
             "filing_type": "e",
             "filing_type_label": "Schedule E Events",
             "backfill_job": backfill_job,

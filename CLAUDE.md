@@ -4,7 +4,7 @@ FastAPI application that monitors FEC filings (F3X and Schedule E) and provides 
 
 ## GCP Deployment
 
-All resources are in the **freeway-2026** GCP project:
+All resources are in the **freeway2026** GCP project:
 - **Service**: `fec-monitor` (Cloud Run)
 - **Job**: `fec-ingest-job` (Cloud Run Job)
 - **Cron**: `fec-ingest-job-trigger` (Cloud Scheduler)
@@ -45,15 +45,23 @@ scripts/
 
 The job is triggered by Cloud Scheduler every 5 minutes. It processes filings in batches until no new filings are found, then exits.
 
+### RSS Feed
+
+The FEC RSS feed (`efilingapps.fec.gov/rss/generate`) returns all filings from the **last 7 days**. There is no documented item limit or hard cap — the feed appears to return everything within that window regardless of volume. The feed is not paginated. On quiet days this may be a few hundred items; on quarterly deadline days it could be much larger.
+
+If the feed ever silently truncates on high-volume days, the FEC eFiling API (`api.open.fec.gov`) could be used as an end-of-day reconciliation pass, but this hasn't been needed yet.
+
 ### Ingestion Flow
 
-1. RSS feed is fetched (contains ~5000+ items)
-2. For each item, `claim_filing()` marks it as seen in `seen_filings` table
-3. FEC file is downloaded and parsed (header only for F3X)
-4. Filing data is saved to database
-5. After all batches complete, email alerts are sent (if enabled)
+1. RSS feed is fetched and walked newest-first
+2. Only today's filings are processed (stops when `pub_date < today`)
+3. For each item, `claim_filing()` attempts an INSERT into `seen_filings` with `status='claimed'` — if the row already exists, the filing is skipped
+4. FEC file is downloaded and parsed (header only for F3X)
+5. Filing data is saved to database and status updated to `ingested`
+6. On failure, status is set to `failed` or `skipped` (for oversized files)
+7. After all batches complete, email alerts are sent (if enabled)
 
-**Important**: If a filing is claimed but the download/parse fails (e.g., OOM), it won't be retried automatically. See "Recovering Failed Filings" below.
+The `seen_filings.status` field tracks the lifecycle: `claimed` → `ingested` / `failed` / `skipped`. Failed filings can be queried directly without needing a cross-table join.
 
 ## Config Settings (via /config page)
 
@@ -138,17 +146,23 @@ See `app/settings.py`:
 
 ### Recovering Failed Filings
 
-Some filings may be "claimed but not saved" if OOM occurred during download/parse. To find and retry them:
+The `seen_filings.status` field tracks filing outcomes. To find and retry failed filings:
 
 ```sql
--- Find claimed filings that don't have data
-SELECT sf.filing_id
-FROM seen_filings sf
-LEFT JOIN filing_f3x f ON sf.filing_id = f.filing_id
-WHERE f.filing_id IS NULL AND sf.source_feed != 'BACKFILL';
+-- Find failed or stuck (claimed but never completed) filings
+SELECT filing_id, source_feed, status, first_seen_utc
+FROM seen_filings
+WHERE status IN ('failed', 'claimed');
 
--- Delete from seen_filings to allow retry
+-- Reset to allow retry
+UPDATE seen_filings SET status = 'claimed'
+WHERE status = 'failed';
+-- Or delete to fully re-process:
 DELETE FROM seen_filings WHERE filing_id IN (...);
 ```
 
 Then run the job again with sufficient memory.
+
+### Future Improvements
+
+- **Stream F3X header parsing** — Currently `download_fec_text` downloads the entire file even though F3X only needs the first ~100 lines. Streaming just the first ~50KB would eliminate the large file problem for F3X entirely. Schedule E still needs the full download since every line is a separate event.
