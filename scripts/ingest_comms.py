@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from app.db import make_engine
 from app.settings import load_settings
-from app.schemas import Committee, SeenFiling, FilingF3X, IEScheduleE
+from app.schemas import Committee, FilingF3X, IEScheduleE
 
 load_dotenv()
 

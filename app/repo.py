@@ -3,10 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-from sqlalchemy import select
 from sqlmodel import Session
 
-from .schemas import SeenFiling, FilingF3X, IEScheduleE, AppConfig, SkippedFiling
+from .schemas import IngestionTask, FilingF3X, IEScheduleE, AppConfig
 
 
 # Default values for configurable settings
@@ -37,44 +36,18 @@ def get_email_enabled(session: Session) -> bool:
     return True  # Default to enabled
 
 
-def record_skipped_filing(
-    session: Session,
-    filing_id: int,
-    reason: str,
-    file_size_mb: float = None,
-    fec_url: str = None,
-) -> None:
-    """Record a filing that was skipped due to size or other issues."""
-    existing = session.get(SkippedFiling, filing_id)
-    if existing:
-        return  # Already recorded
-
-    try:
-        session.begin_nested()
-        skipped = SkippedFiling(
-            filing_id=filing_id,
-            reason=reason,
-            file_size_mb=file_size_mb,
-            fec_url=fec_url,
-        )
-        session.add(skipped)
-        session.flush()
-    except Exception:
-        session.rollback()
-
-
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
     """
     Returns True if we successfully claimed this filing_id+source_feed (first time seen).
     Handles race conditions where another process already claimed it.
     """
-    existing = session.get(SeenFiling, (filing_id, source_feed))
+    existing = session.get(IngestionTask, (filing_id, source_feed))
     if existing:
         return False
 
     try:
         session.begin_nested()
-        session.add(SeenFiling(
+        session.add(IngestionTask(
             filing_id=filing_id,
             source_feed=source_feed,
             status="claimed",
@@ -82,7 +55,6 @@ def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
         session.flush()
         return True
     except Exception:
-        # Duplicate or other error - rollback the savepoint and continue
         session.rollback()
         return False
 
@@ -92,12 +64,88 @@ def update_filing_status(
     filing_id: int,
     source_feed: str,
     status: str,
+    failed_step: str = None,
+    error_message: str = None,
 ) -> None:
-    """Update the status of a seen filing."""
-    row = session.get(SeenFiling, (filing_id, source_feed))
+    """Update the status of an ingestion task, optionally recording failure details."""
+    row = session.get(IngestionTask, (filing_id, source_feed))
     if row:
         row.status = status
+        row.updated_at = datetime.now(timezone.utc)
+        if failed_step is not None:
+            row.failed_step = failed_step
+        if error_message is not None:
+            row.error_message = error_message
         session.add(row)
+
+
+def record_skipped_filing(
+    session: Session,
+    filing_id: int,
+    source_feed: str,
+    reason: str,
+    file_size_mb: float = None,
+    fec_url: str = None,
+) -> None:
+    """Record skip metadata on the existing IngestionTask row."""
+    row = session.get(IngestionTask, (filing_id, source_feed))
+    if row:
+        row.skip_reason = reason
+        row.file_size_mb = file_size_mb
+        row.fec_url = fec_url
+        row.updated_at = datetime.now(timezone.utc)
+        session.add(row)
+
+
+def mark_tasks_emailed(
+    session: Session,
+    filing_ids: list[int],
+    source_feed: str = None,
+) -> None:
+    """Set emailed_at on IngestionTask rows after alerts are sent.
+
+    If source_feed is given, looks up by (filing_id, source_feed).
+    If None, marks all tasks matching the filing_ids (for IE where
+    the source feed URL varies).
+    """
+    from sqlmodel import select
+    now = datetime.now(timezone.utc)
+    if source_feed is not None:
+        for fid in filing_ids:
+            row = session.get(IngestionTask, (fid, source_feed))
+            if row:
+                row.emailed_at = now
+                session.add(row)
+    else:
+        stmt = select(IngestionTask).where(
+            IngestionTask.filing_id.in_(filing_ids),
+            IngestionTask.emailed_at.is_(None),
+        )
+        for row in session.exec(stmt).all():
+            row.emailed_at = now
+            session.add(row)
+
+
+def reset_failed_tasks(
+    session: Session,
+    filing_ids: list[int] = None,
+) -> int:
+    """Reset failed tasks back to 'claimed' for retry. Returns count reset."""
+    from sqlmodel import select
+    stmt = select(IngestionTask).where(
+        IngestionTask.status == "failed"
+    )
+    if filing_ids is not None:
+        stmt = stmt.where(IngestionTask.filing_id.in_(filing_ids))
+    rows = session.exec(stmt).all()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        row.status = "claimed"
+        row.failed_step = None
+        row.error_message = None
+        row.updated_at = now
+        session.add(row)
+    return len(rows)
 
 
 def upsert_f3x(

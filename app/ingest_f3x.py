@@ -58,19 +58,29 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
         print(f"[F3X] Processing new filing {filing_id} ({new_count + 1})")
         _log_mem(f"before_download_{filing_id}")
 
+        update_filing_status(session, filing_id, "F3X", "downloading")
         try:
             fec_text = download_fec_text(item.link, max_size_mb=MAX_FILE_SIZE_MB)
         except FileTooLargeError as e:
             print(f"[F3X] Skipping {filing_id}: {e.size_mb:.1f}MB exceeds limit")
             record_skipped_filing(
-                session, filing_id, "too_large",
+                session, filing_id, "F3X", "too_large",
                 file_size_mb=e.size_mb, fec_url=item.link
             )
             update_filing_status(
                 session, filing_id, "F3X", "skipped")
             continue
+        except Exception as e:
+            print(f"[F3X] Download failed for {filing_id}: {e}")
+            update_filing_status(
+                session, filing_id, "F3X", "failed",
+                failed_step="downloading", error_message=str(e)[:500])
+            continue
+
+        update_filing_status(session, filing_id, "F3X", "downloaded")
         _log_mem(f"after_download_{filing_id}")
 
+        update_filing_status(session, filing_id, "F3X", "parsing")
         try:
             # Light parse - header only, no fecfile
             parsed = parse_f3x_header_only(fec_text)
@@ -112,7 +122,8 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
         except Exception as e:
             print(f"[F3X] Failed to process {filing_id}: {e}")
             update_filing_status(
-                session, filing_id, "F3X", "failed")
+                session, filing_id, "F3X", "failed",
+                failed_step="parsing", error_message=str(e)[:500])
             continue
 
         # Explicit cleanup to free memory

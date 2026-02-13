@@ -55,20 +55,22 @@ If the feed ever silently truncates on high-volume days, the FEC eFiling API (`a
 
 1. RSS feed is fetched and walked newest-first
 2. Only today's filings are processed (stops when `pub_date < today`)
-3. For each item, `claim_filing()` attempts an INSERT into `seen_filings` with `status='claimed'` — if the row already exists, the filing is skipped
-4. FEC file is downloaded and parsed (header only for F3X)
-5. Filing data is saved to database and status updated to `ingested`
-6. On failure, status is set to `failed` or `skipped` (for oversized files)
-7. After all batches complete, email alerts are sent (if enabled)
+3. For each item, `claim_filing()` attempts an INSERT into `ingestion_tasks` with `status='claimed'` — if the row already exists, the filing is skipped
+4. Status is updated through substeps: `claimed` → `downloading` → `downloaded` → `parsing` → `ingested`
+5. On download failure: status set to `failed` with `failed_step='downloading'` and error details
+6. On parse failure: status set to `failed` with `failed_step='parsing'` and error details
+7. On oversized files: status set to `skipped` with `skip_reason='too_large'` and file size
+8. After all batches complete, email alerts are sent (if enabled) and `emailed_at` is set
 
-The `seen_filings.status` field tracks the lifecycle: `claimed` → `ingested` / `failed` / `skipped`. Failed filings can be queried directly without needing a cross-table join.
+The `ingestion_tasks` table tracks the full lifecycle in one place: status, substep, error details, skip metadata, and email tracking. Use `reset_failed_tasks()` in `app/repo.py` to retry failed filings programmatically.
 
 ## Config Settings (via /config page)
 
 - **Email alerts enabled**: Toggle to disable emails during backfill
 - **Max filings per run**: Limit per batch to avoid OOM (default: 50)
+- **Per-recipient committee filtering**: Each email recipient can optionally have a `committee_ids` list (JSONB). If set, they only receive alerts for filings from those committees. If null/empty, they receive all alerts.
 
-These are stored in the `app_config` table and read at runtime.
+These are stored in the `app_config` table (settings) and `email_recipients` table (recipient filters) and read at runtime.
 
 ## Memory Optimization
 
@@ -125,10 +127,12 @@ See `app/settings.py`:
 ## Endpoints
 
 ### Dashboards (HTML)
-- `GET /dashboard/3x` - Today's F3X filings
+- `GET /dashboard/3x` - Today's F3X filings (supports `?threshold=` filter, default $50k)
 - `GET /dashboard/e` - Today's Schedule E events
-- `GET /{year}/{month}/{day}/3x` - Historical F3X
+- `GET /{year}/{month}/{day}/3x` - Historical F3X (supports `?threshold=` filter)
 - `GET /{year}/{month}/{day}/e` - Historical Schedule E
+
+Dashboard nav links are date-aware — clicking "3X Dashboard" or "Schedule E Dashboard" navigates to the currently displayed date, not always today.
 
 ### API (JSON)
 - `GET /api/3x/today` - Today's F3X filings
@@ -139,29 +143,30 @@ See `app/settings.py`:
 - `GET /config` - Config page (settings, email recipients, job status)
 - `POST /config/settings/email_enabled` - Toggle email alerts
 - `POST /config/settings/max_new_per_run` - Set batch size limit
-- `POST /config/recipients` - Add email recipient
+- `POST /config/recipients` - Add email recipient (with optional `committee_ids`)
+- `POST /config/recipients/{id}/committees` - Update recipient's committee filter
+- `POST /config/recipients/{id}/delete` - Remove recipient
 - `POST /config/backfill/{year}/{month}/{day}/{type}` - Trigger manual backfill
 
 ## TODO / Known Issues
 
 ### Recovering Failed Filings
 
-The `seen_filings.status` field tracks filing outcomes. To find and retry failed filings:
+The `ingestion_tasks` table tracks filing outcomes with substep detail. To find and retry failed filings:
 
 ```sql
--- Find failed or stuck (claimed but never completed) filings
-SELECT filing_id, source_feed, status, first_seen_utc
-FROM seen_filings
+-- Find failed filings with error details
+SELECT filing_id, source_feed, status, failed_step, error_message, updated_at
+FROM ingestion_tasks
 WHERE status IN ('failed', 'claimed');
 
--- Reset to allow retry
-UPDATE seen_filings SET status = 'claimed'
+-- Reset failed filings for retry (clears error details)
+UPDATE ingestion_tasks
+SET status = 'claimed', failed_step = NULL, error_message = NULL, updated_at = NOW()
 WHERE status = 'failed';
--- Or delete to fully re-process:
-DELETE FROM seen_filings WHERE filing_id IN (...);
 ```
 
-Then run the job again with sufficient memory.
+Or use `reset_failed_tasks()` from `app/repo.py` programmatically. Then run the job again.
 
 ### Future Improvements
 

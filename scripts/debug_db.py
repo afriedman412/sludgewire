@@ -2,7 +2,7 @@
 from sqlmodel import SQLModel, Session, text
 from app.db import make_engine
 from app.settings import load_settings
-from app.schemas import Committee, SeenFiling, FilingF3X, IEScheduleE
+from app.schemas import Committee, FilingF3X, IEScheduleE
 
 settings = load_settings()
 print(f"Connecting to: {settings.postgres_url}")

@@ -40,18 +40,28 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
             if not claim_filing(session, filing_id, source_feed=feed_url):
                 continue
 
+            update_filing_status(session, filing_id, feed_url, "downloading")
             try:
                 fec_text = download_fec_text(item.link, max_size_mb=MAX_FILE_SIZE_MB)
             except FileTooLargeError as e:
                 print(f"[IE] Skipping {filing_id}: {e.size_mb:.1f}MB exceeds limit")
                 record_skipped_filing(
-                    session, filing_id, "too_large",
+                    session, filing_id, feed_url, "too_large",
                     file_size_mb=e.size_mb, fec_url=item.link
                 )
                 update_filing_status(
                     session, filing_id, feed_url, "skipped")
                 continue
+            except Exception as e:
+                print(f"[IE] Download failed for {filing_id}: {e}")
+                update_filing_status(
+                    session, filing_id, feed_url, "failed",
+                    failed_step="downloading", error_message=str(e)[:500])
+                continue
 
+            update_filing_status(session, filing_id, feed_url, "downloaded")
+
+            update_filing_status(session, filing_id, feed_url, "parsing")
             try:
                 parsed = parse_fec_filing(fec_text)
 
@@ -105,7 +115,8 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
             except Exception as e:
                 print(f"[IE] Failed to process {filing_id}: {e}")
                 update_filing_status(
-                    session, filing_id, feed_url, "failed")
+                    session, filing_id, feed_url, "failed",
+                    failed_step="parsing", error_message=str(e)[:500])
                 continue
 
             # Explicit cleanup to free memory

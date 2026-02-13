@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from sqlalchemy import text
 from app.db import make_engine, init_db
 from app.settings import load_settings
-from app.schemas import FilingF3X, IEScheduleE, SeenFiling, Committee
+from app.schemas import FilingF3X, IEScheduleE, IngestionTask, Committee
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
         if args.truncate:
             session.exec(
                 text(
-                    "TRUNCATE TABLE ie_schedule_e, filings_f3x, seen_filings RESTART IDENTITY CASCADE")
+                    "TRUNCATE TABLE ie_schedule_e, filings_f3x, ingestion_tasks RESTART IDENTITY CASCADE")
             )
             session.commit()
             print("Truncated filing tables")
@@ -47,7 +47,7 @@ def main():
 
             comm_id, comm_name = random.choice(committees)
 
-            session.add(SeenFiling(filing_id=filing_id, source_feed="seed"))
+            session.add(IngestionTask(filing_id=filing_id, source_feed="seed", status="ingested"))
             session.add(
                 FilingF3X(
                     filing_id=filing_id,

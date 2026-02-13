@@ -1,7 +1,7 @@
 # app/schemas.py
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, Dict, Any
 
 from sqlmodel import SQLModel, Field, Column
@@ -40,14 +40,34 @@ class Committee(SQLModel, table=True):
         default_factory=datetime.utcnow, index=True)
 
 
-class SeenFiling(SQLModel, table=True):
-    __tablename__ = "seen_filings"
+class IngestionTask(SQLModel, table=True):
+    __tablename__ = "ingestion_tasks"
     __table_args__ = (PrimaryKeyConstraint("filing_id", "source_feed"),)
 
     filing_id: int = Field(sa_column=Column(BigInteger))
     source_feed: str = Field(default="")
-    status: str = Field(default="claimed", index=True)  # claimed, ingested, failed, skipped
-    first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
+
+    # Pipeline status: claimed → downloading → downloaded → parsing → ingested
+    # Terminal states: failed, skipped
+    status: str = Field(default="claimed", index=True)
+
+    # Which substep failed (downloading, parsing, etc.) — null if successful
+    failed_step: Optional[str] = None
+
+    # Error details
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+    # Skip metadata (replaces skipped_filings table)
+    skip_reason: Optional[str] = None
+    file_size_mb: Optional[float] = None
+    fec_url: Optional[str] = None
+
+    # Email tracking (completes the pipeline: ingested → emailed)
+    emailed_at: Optional[datetime] = Field(default=None)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class FilingF3X(SQLModel, table=True):
@@ -148,12 +168,3 @@ class AppConfig(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class SkippedFiling(SQLModel, table=True):
-    """Filings that were skipped due to size or other issues."""
-    __tablename__ = "skipped_filings"
-
-    filing_id: int = Field(primary_key=True)
-    reason: str  # "too_large", "download_error", etc.
-    file_size_mb: Optional[float] = None
-    fec_url: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

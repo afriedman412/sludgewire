@@ -22,7 +22,7 @@ from app.db import make_engine, init_db
 from app.ingest_f3x import run_f3x
 from app.ingest_ie import run_ie_schedule_e
 from app.email_service import send_filing_alert
-from app.repo import get_max_new_per_run, get_email_enabled
+from app.repo import get_max_new_per_run, get_email_enabled, mark_tasks_emailed
 from app.schemas import AppConfig, FilingF3X, IEScheduleE
 
 
@@ -190,6 +190,11 @@ def run_job():
                                     for f in f3x_filings:
                                         f.emailed_at = now
                                         session.add(f)
+                                    mark_tasks_emailed(
+                                        session,
+                                        [f.filing_id for f in f3x_filings],
+                                        "F3X",
+                                    )
                                     session.commit()
                                     all_sent_to.update(sent.keys())
                                     log(f"Sent F3X alert for {len(f3x_filings)} filings to {len(sent)} recipients")
@@ -226,6 +231,8 @@ def run_job():
                                     for e in ie_events_list:
                                         e.emailed_at = now
                                         session.add(e)
+                                    ie_fids = list(set(e.filing_id for e in ie_events_list))
+                                    mark_tasks_emailed(session, ie_fids)
                                     session.commit()
                                     all_sent_to.update(sent.keys())
                                     log(f"Sent IE alert for {len(ie_events_list)} events to {len(sent)} recipients")

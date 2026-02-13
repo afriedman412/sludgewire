@@ -6,7 +6,7 @@ from sqlmodel import SQLModel
 
 # Import all models to register them
 from app.schemas import (
-    Committee, SeenFiling, FilingF3X, IEScheduleE,
+    Committee, IngestionTask, FilingF3X, IEScheduleE,
     EmailRecipient, BackfillJob, AppConfig
 )
 
