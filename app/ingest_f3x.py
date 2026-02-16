@@ -6,10 +6,10 @@ from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
-from .fec_parse import download_fec_text, parse_f3x_header_only, extract_committee_name, FileTooLargeError
-from .repo import claim_filing, update_filing_status, upsert_f3x, get_max_new_per_run, record_skipped_filing
+from .fec_parse import download_fec_header, parse_f3x_header_only, extract_committee_name
+from .repo import claim_filing, update_filing_status, upsert_f3x, get_max_new_per_run
 
-MAX_FILE_SIZE_MB = 50  # Skip files larger than this
+MAX_HEADER_BYTES = 50_000  # Only need first ~50KB for F3X header
 
 
 def _log_mem(label: str):
@@ -60,16 +60,7 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
 
         update_filing_status(session, filing_id, "F3X", "downloading")
         try:
-            fec_text = download_fec_text(item.link, max_size_mb=MAX_FILE_SIZE_MB)
-        except FileTooLargeError as e:
-            print(f"[F3X] Skipping {filing_id}: {e.size_mb:.1f}MB exceeds limit")
-            record_skipped_filing(
-                session, filing_id, "F3X", "too_large",
-                file_size_mb=e.size_mb, fec_url=item.link
-            )
-            update_filing_status(
-                session, filing_id, "F3X", "skipped")
-            continue
+            fec_text = download_fec_header(item.link, max_bytes=MAX_HEADER_BYTES)
         except Exception as e:
             print(f"[F3X] Download failed for {filing_id}: {e}")
             update_filing_status(

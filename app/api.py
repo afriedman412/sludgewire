@@ -539,7 +539,14 @@ def trigger_backfill(
     # Check if already running or completed
     job = get_backfill_status(session, target_date, filing_type)
     if job and job.status == "running":
-        return {"status": "already_running", "job_id": job.id}
+        # Auto-reset stale jobs (stuck for > 10 min)
+        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+        if job.started_at and job.started_at < stale:
+            job.status = "pending"
+            session.add(job)
+            session.commit()
+        else:
+            return {"status": "already_running", "job_id": job.id}
     if job and job.status == "completed":
         return {"status": "already_completed", "filings_found": job.filings_found}
 

@@ -54,6 +54,25 @@ def download_fec_text(fec_url: str, max_size_mb: float = None) -> str:
     return r.text
 
 
+def download_fec_header(fec_url: str, max_bytes: int = 50_000) -> str:
+    """Stream just the first max_bytes of an FEC file (for header-only parsing).
+
+    F3X header parsing only needs the first ~100 lines. Streaming avoids
+    downloading 100MB+ files when we only need the first 50KB.
+    """
+    r = requests.get(fec_url, timeout=30, stream=True)
+    r.raise_for_status()
+    chunks = []
+    total = 0
+    for chunk in r.iter_content(chunk_size=8192, decode_unicode=True):
+        chunks.append(chunk)
+        total += len(chunk)
+        if total >= max_bytes:
+            break
+    r.close()
+    return "".join(chunks)
+
+
 def parse_fec_filing(fec_text: str) -> dict:
     """Parse FEC filing text and return the parsed dict."""
     return _get_fecfile().loads(fec_text)
