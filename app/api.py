@@ -540,8 +540,8 @@ def trigger_backfill(
     job = get_backfill_status(session, target_date, filing_type)
     if job and job.status == "running":
         # Auto-reset stale jobs (stuck for > 10 min)
-        stale = datetime.now(timezone.utc) - timedelta(minutes=10)
-        if job.started_at and job.started_at < stale:
+        stale = datetime.utcnow() - timedelta(minutes=10)
+        if job.started_at and job.started_at.replace(tzinfo=None) < stale:
             job.status = "pending"
             session.add(job)
             session.commit()
@@ -637,8 +637,6 @@ def dashboard_date_3x(
     limit: int = Query(default=500, ge=1, le=5000),
 ):
     """Date-based F3X dashboard. Backfill must be triggered manually via /config."""
-    from .backfill import get_backfill_status
-
     try:
         target_date = date(year, month, day)
     except ValueError:
@@ -649,9 +647,6 @@ def dashboard_date_3x(
     # For current day, trigger rate-limited ingestion
     if target_date == today:
         _maybe_run_ingestion()
-
-    # Check backfill status (but don't auto-trigger)
-    backfill_job = get_backfill_status(session, target_date, "3x")
 
     start_utc, end_utc = _date_utc_bounds(target_date)
     stmt = (
@@ -683,7 +678,6 @@ def dashboard_date_3x(
             "threshold": threshold,
             "filing_type": "3x",
             "filing_type_label": label,
-            "backfill_job": backfill_job,
         },
     )
 
@@ -698,8 +692,6 @@ def dashboard_date_e(
     limit: int = Query(default=500, ge=1, le=5000),
 ):
     """Date-based Schedule E dashboard. Backfill must be triggered manually via /config."""
-    from .backfill import get_backfill_status
-
     try:
         target_date = date(year, month, day)
     except ValueError:
@@ -710,9 +702,6 @@ def dashboard_date_e(
     # For current day, trigger rate-limited ingestion
     if target_date == today:
         _maybe_run_ingestion()
-
-    # Check backfill status (but don't auto-trigger)
-    backfill_job = get_backfill_status(session, target_date, "e")
 
     # Query events for this date
     start_utc, end_utc = _date_utc_bounds(target_date)
@@ -737,7 +726,6 @@ def dashboard_date_e(
             "nav_date": target_date,
             "filing_type": "e",
             "filing_type_label": "Schedule E Events",
-            "backfill_job": backfill_job,
         },
     )
 

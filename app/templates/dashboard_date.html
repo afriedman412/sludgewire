@@ -24,49 +24,7 @@
         font-weight: bold;
         font-size: 1.1em;
     }
-    .backfill-status {
-        padding: 12px;
-        border-radius: 4px;
-        margin-bottom: 16px;
-    }
-    .backfill-status.pending {
-        background: #fff3cd;
-        color: #856404;
-    }
-    .backfill-status.running {
-        background: #cce5ff;
-        color: #004085;
-    }
-    .backfill-status.completed {
-        background: #d4edda;
-        color: #155724;
-    }
-    .backfill-status.failed {
-        background: #f8d7da;
-        color: #721c24;
-    }
-    .spinner {
-        display: inline-block;
-        width: 16px;
-        height: 16px;
-        border: 2px solid #ccc;
-        border-top-color: #333;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin-right: 8px;
-    }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
 </style>
-{% if backfill_job and backfill_job.status in ['pending', 'running'] %}
-<script>
-    // Auto-refresh when backfill is in progress
-    setTimeout(function() {
-        location.reload();
-    }, 3000);
-</script>
-{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -94,22 +52,6 @@
     <a href="/dashboard/{{ filing_type }}{% if filing_type == '3x' and threshold is defined %}?threshold={{ threshold | int }}{% endif %}">Today</a>
     {% endif %}
 </div>
-
-{% if backfill_job %}
-<div class="backfill-status {{ backfill_job.status }}">
-    {% if backfill_job.status == 'pending' %}
-    <span class="spinner"></span>
-    Starting backfill from FEC API...
-    {% elif backfill_job.status == 'running' %}
-    <span class="spinner"></span>
-    Fetching data from FEC API... {{ backfill_job.error_message or '' }}
-    {% elif backfill_job.status == 'completed' %}
-    Backfill complete. Found {{ backfill_job.filings_found }} {{ 'filings' if filing_type == '3x' else 'events' }}.
-    {% elif backfill_job.status == 'failed' %}
-    Backfill failed: {{ backfill_job.error_message or 'Unknown error' }}
-    {% endif %}
-</div>
-{% endif %}
 
 {% if filing_type == '3x' %}
 {# F3X Table #}
