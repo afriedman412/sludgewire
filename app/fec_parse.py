@@ -62,15 +62,13 @@ def download_fec_header(fec_url: str, max_bytes: int = 50_000) -> str:
     """
     r = requests.get(fec_url, timeout=30, stream=True)
     r.raise_for_status()
-    chunks = []
-    total = 0
-    for chunk in r.iter_content(chunk_size=8192, decode_unicode=True):
-        chunks.append(chunk)
-        total += len(chunk)
-        if total >= max_bytes:
+    raw = b""
+    for chunk in r.iter_content(chunk_size=8192):
+        raw += chunk
+        if len(raw) >= max_bytes:
             break
     r.close()
-    return "".join(chunks)
+    return raw.decode("utf-8", errors="replace")
 
 
 def parse_fec_filing(fec_text: str) -> dict:
