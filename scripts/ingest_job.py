@@ -62,6 +62,8 @@ def run_job():
     start_time = time.time()
     iteration = 0
     total_f3x = 0
+    total_f3x_failed = 0
+    last_f3x_error = None
     total_ie_filings = 0
     total_ie_events = 0
 
@@ -71,6 +73,7 @@ def run_job():
         "started_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
         "f3x_new": 0,
+        "f3x_failed": 0,
         "ie_events_new": 0,
         "iterations": 0,
         "email_sent": False,
@@ -97,15 +100,20 @@ def run_job():
                 # Run F3X ingestion
                 f3x_new = 0
                 try:
-                    f3x_new = run_f3x(
+                    f3x_result = run_f3x(
                         session,
                         feed_url=settings.f3x_feed,
                         receipts_threshold=settings.receipts_threshold,
                     )
+                    f3x_new = f3x_result.new_count
                     total_f3x += f3x_new
-                    log(f"F3X: {f3x_new} new filings this batch")
+                    total_f3x_failed += f3x_result.failed_count
+                    if f3x_result.last_error:
+                        last_f3x_error = f3x_result.last_error
+                    log(f"F3X: {f3x_new} new, {f3x_result.failed_count} failed this batch")
                 except Exception as e:
                     log(f"F3X error: {e}")
+                    last_f3x_error = str(e)
 
                 # Run IE ingestion
                 ie_filings = 0
@@ -126,8 +134,14 @@ def run_job():
 
             # Update status after each iteration
             results["f3x_new"] = total_f3x
+            results["f3x_failed"] = total_f3x_failed
             results["ie_events_new"] = total_ie_events
             results["iterations"] = iteration
+            if last_f3x_error:
+                results["f3x_error"] = (
+                    f"{total_f3x_failed} filing(s) failed: "
+                    f"{last_f3x_error}"
+                )
             save_job_status(engine, results)
 
             # Check if we're caught up (no new filings in this batch)
@@ -244,7 +258,8 @@ def run_job():
             except Exception as e:
                 log(f"Email error (non-fatal): {e}")
 
-        results["status"] = "success"
+        has_errors = total_f3x_failed > 0
+        results["status"] = "completed_with_errors" if has_errors else "success"
         results["completed_at"] = datetime.now(timezone.utc).isoformat()
         save_job_status(engine, results)
 

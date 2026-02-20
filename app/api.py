@@ -822,12 +822,17 @@ def cron_check_new(session: Session = Depends(get_session)):
         # Run F3X ingestion
         _log_memory("before_f3x_ingestion", results)
         try:
-            f3x_count = run_f3x(
+            f3x_result = run_f3x(
                 session,
                 feed_url=settings.f3x_feed,
                 receipts_threshold=settings.receipts_threshold,
             )
-            results["f3x_new"] = f3x_count
+            results["f3x_new"] = f3x_result.new_count
+            if f3x_result.failed_count > 0:
+                results["f3x_error"] = (
+                    f"{f3x_result.failed_count} filing(s) failed: "
+                    f"{f3x_result.last_error}"
+                )
         except Exception as e:
             results["f3x_error"] = str(e)
         _log_memory("after_f3x_ingestion", results)

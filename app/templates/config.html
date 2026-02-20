@@ -212,10 +212,11 @@
             <dt>Data Found</dt>
             <dd>
                 F3X: {{ last_cron_run.f3x_new }} new
-                {% if last_cron_run.f3x_error %}<span style="color: #dc3545;">(error)</span>{% endif %}
+                {% if last_cron_run.f3x_failed %}<span style="color: #dc3545;">, {{ last_cron_run.f3x_failed }} failed</span>{% endif %}
+                {% if last_cron_run.f3x_error %}<span style="color: #dc3545;"> (error)</span>{% endif %}
                 &bull;
                 IE Events: {{ last_cron_run.ie_events_new }} new
-                {% if last_cron_run.ie_error %}<span style="color: #dc3545;">(error)</span>{% endif %}
+                {% if last_cron_run.ie_error %}<span style="color: #dc3545;"> (error)</span>{% endif %}
             </dd>
 
             <dt>Email</dt>
