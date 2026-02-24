@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import gc
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Optional
 from sqlmodel import Session
 
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
@@ -10,6 +12,14 @@ from .fec_parse import download_fec_header, parse_f3x_header_only, extract_commi
 from .repo import claim_filing, update_filing_status, upsert_f3x, get_max_new_per_run
 
 MAX_HEADER_BYTES = 50_000  # Only need first ~50KB for F3X header
+
+
+@dataclass
+class F3XResult:
+    new_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    last_error: Optional[str] = None
 
 
 def _log_mem(label: str):
@@ -27,13 +37,12 @@ def _log_mem(label: str):
         pass
 
 
-def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> int:
+def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> F3XResult:
+    result = F3XResult()
     max_per_run = get_max_new_per_run(session)
     items = fetch_rss_items(feed_url)
     print(f"[F3X] RSS feed has {len(items)} items (max {max_per_run} per run)")
     _log_mem("after_fetch_rss")
-    new_count = 0
-    skipped = 0
     today = datetime.now(timezone.utc).date()
 
     for i, item in enumerate(items):
@@ -43,7 +52,7 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
             break
 
         # Stop if we've processed enough new filings this run
-        if new_count >= max_per_run:
+        if result.new_count >= max_per_run:
             print(
                 f"[F3X] Reached limit of {max_per_run} new filings, stopping")
             break
@@ -52,10 +61,10 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
             continue
 
         if not claim_filing(session, filing_id, source_feed="F3X"):
-            skipped += 1
+            result.skipped_count += 1
             continue
 
-        print(f"[F3X] Processing new filing {filing_id} ({new_count + 1})")
+        print(f"[F3X] Processing new filing {filing_id} ({result.new_count + 1})")
         _log_mem(f"before_download_{filing_id}")
 
         update_filing_status(session, filing_id, "F3X", "downloading")
@@ -66,6 +75,8 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
             update_filing_status(
                 session, filing_id, "F3X", "failed",
                 failed_step="downloading", error_message=str(e)[:500])
+            result.failed_count += 1
+            result.last_error = str(e)[:500]
             continue
 
         update_filing_status(session, filing_id, "F3X", "downloaded")
@@ -115,6 +126,8 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
             update_filing_status(
                 session, filing_id, "F3X", "failed",
                 failed_step="parsing", error_message=str(e)[:500])
+            result.failed_count += 1
+            result.last_error = str(e)[:500]
             continue
 
         # Explicit cleanup to free memory
@@ -123,8 +136,8 @@ def run_f3x(session: Session, *, feed_url: str, receipts_threshold: float) -> in
         gc.collect()
         _log_mem(f"after_gc_{filing_id}")
 
-        new_count += 1
+        result.new_count += 1
 
-    print(f"[F3X] Done: {new_count} new, {skipped} skipped")
+    print(f"[F3X] Done: {result.new_count} new, {result.failed_count} failed, {result.skipped_count} skipped")
     _log_mem("end")
-    return new_count
+    return result

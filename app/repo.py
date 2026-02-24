@@ -5,7 +5,9 @@ from typing import Optional, Dict, Any
 
 from sqlmodel import Session
 
-from .schemas import IngestionTask, FilingF3X, IEScheduleE, AppConfig
+import json
+
+from .schemas import IngestionTask, FilingF3X, IEScheduleE, ScheduleA, AppConfig
 
 
 # Default values for configurable settings
@@ -220,3 +222,34 @@ def insert_ie_event(session: Session, event: IEScheduleE) -> bool:
     except Exception:
         session.rollback()
         return False
+
+
+def insert_sa_event(session: Session, event: ScheduleA) -> bool:
+    """
+    Insert-only dedupe by primary key event_id.
+    Returns True if inserted, False if already existed.
+    """
+    existing = session.get(ScheduleA, event.event_id)
+    if existing:
+        return False
+    try:
+        session.begin_nested()
+        session.add(event)
+        session.flush()
+        return True
+    except Exception:
+        session.rollback()
+        return False
+
+
+def get_sa_target_committee_ids(session: Session) -> list[str]:
+    """Get the list of committee IDs for Schedule A parsing."""
+    config = session.get(AppConfig, "sa_target_committee_ids")
+    if config and config.value:
+        try:
+            ids = json.loads(config.value)
+            if isinstance(ids, list):
+                return [c.strip() for c in ids if isinstance(c, str) and c.strip()]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []

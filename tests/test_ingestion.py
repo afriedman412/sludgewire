@@ -335,7 +335,7 @@ class TestRunF3XIntegration:
     FAKE_FEC_TEXT = "HDR|FEC|8.3\nF3XN|Test PAC|C00000001|0|0|0|75000.00|rest...\n"
 
     @patch("app.ingest_f3x.resolve_committee_name", return_value="Test PAC")
-    @patch("app.ingest_f3x.download_fec_text")
+    @patch("app.ingest_f3x.download_fec_header")
     @patch("app.ingest_f3x.fetch_rss_items")
     def test_successful_ingestion(self, mock_fetch, mock_download, mock_resolve, session):
         now = datetime.now(timezone.utc)
@@ -343,9 +343,10 @@ class TestRunF3XIntegration:
         mock_download.return_value = self.FAKE_FEC_TEXT
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 1
+        assert result.new_count == 1
+        assert result.failed_count == 0
         # Verify ingestion_tasks status
         task = session.get(IngestionTask, (1001, "F3X"))
         assert task is not None
@@ -355,7 +356,7 @@ class TestRunF3XIntegration:
         assert f3x is not None
 
     @patch("app.ingest_f3x.resolve_committee_name", return_value="Test PAC")
-    @patch("app.ingest_f3x.download_fec_text", side_effect=Exception("Network error"))
+    @patch("app.ingest_f3x.download_fec_header", side_effect=Exception("Network error"))
     @patch("app.ingest_f3x.fetch_rss_items")
     def test_download_failure_marks_failed(self, mock_fetch, mock_download, mock_resolve, session):
         """Generic download errors are now caught and recorded as failed."""
@@ -363,9 +364,11 @@ class TestRunF3XIntegration:
         mock_fetch.return_value = [make_rss_item(filing_id=1002, pub_date=now)]
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 0
+        assert result.new_count == 0
+        assert result.failed_count == 1
+        assert "Network error" in result.last_error
         task = session.get(IngestionTask, (1002, "F3X"))
         assert task is not None
         assert task.status == "failed"
@@ -381,9 +384,9 @@ class TestRunF3XIntegration:
         session.commit()
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 0  # nothing new processed
+        assert result.new_count == 0  # nothing new processed
 
     @patch("app.ingest_f3x.fetch_rss_items")
     def test_stops_at_yesterday(self, mock_fetch, session):
@@ -392,33 +395,30 @@ class TestRunF3XIntegration:
         mock_fetch.return_value = [make_rss_item(filing_id=1004, pub_date=yesterday)]
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 0
+        assert result.new_count == 0
         assert session.get(IngestionTask, (1004, "F3X")) is None
 
-    @patch("app.ingest_f3x.download_fec_text")
+    @patch("app.ingest_f3x.download_fec_header", side_effect=Exception("Connection reset"))
     @patch("app.ingest_f3x.fetch_rss_items")
-    def test_file_too_large_marks_skipped(self, mock_fetch, mock_download, session):
-        from app.fec_parse import FileTooLargeError
-
+    def test_download_error_tracked_in_result(self, mock_fetch, mock_download, session):
+        """Download errors are tracked in the returned result."""
         now = datetime.now(timezone.utc)
         mock_fetch.return_value = [make_rss_item(filing_id=1005, pub_date=now)]
-        mock_download.side_effect = FileTooLargeError("http://fake/1005.fec", 120.0, 50.0)
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 0
+        assert result.new_count == 0
+        assert result.failed_count == 1
         task = session.get(IngestionTask, (1005, "F3X"))
         assert task is not None
-        assert task.status == "skipped"
-        # Verify skip metadata on the same row
-        assert task.skip_reason == "too_large"
-        assert task.file_size_mb == 120.0
+        assert task.status == "failed"
+        assert task.failed_step == "downloading"
 
     @patch("app.ingest_f3x.resolve_committee_name", return_value="Test PAC")
-    @patch("app.ingest_f3x.download_fec_text")
+    @patch("app.ingest_f3x.download_fec_header")
     @patch("app.ingest_f3x.fetch_rss_items")
     def test_respects_max_per_run(self, mock_fetch, mock_download, mock_resolve, session):
         session.add(AppConfig(key="max_new_per_run", value="1"))
@@ -432,15 +432,15 @@ class TestRunF3XIntegration:
         mock_download.return_value = self.FAKE_FEC_TEXT
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 1
+        assert result.new_count == 1
         # Second filing should not have been claimed
         assert session.get(IngestionTask, (2002, "F3X")) is None
 
     @patch("app.ingest_f3x.resolve_committee_name", return_value="Test PAC")
     @patch("app.ingest_f3x.parse_f3x_header_only", side_effect=ValueError("bad data"))
-    @patch("app.ingest_f3x.download_fec_text")
+    @patch("app.ingest_f3x.download_fec_header")
     @patch("app.ingest_f3x.fetch_rss_items")
     def test_parse_failure_marks_failed(self, mock_fetch, mock_download, mock_parse, mock_resolve, session):
         """Parse errors are caught and recorded with failed_step='parsing'."""
@@ -449,9 +449,10 @@ class TestRunF3XIntegration:
         mock_download.return_value = self.FAKE_FEC_TEXT
 
         from app.ingest_f3x import run_f3x
-        count = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
+        result = run_f3x(session, feed_url="http://fake", receipts_threshold=50_000)
 
-        assert count == 0
+        assert result.new_count == 0
+        assert result.failed_count == 1
         task = session.get(IngestionTask, (1006, "F3X"))
         assert task.status == "failed"
         assert task.failed_step == "parsing"

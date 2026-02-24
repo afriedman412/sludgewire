@@ -10,7 +10,8 @@ import gc
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, time as dtime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
@@ -19,8 +20,10 @@ sys.path.insert(0, "/app")
 
 from app.settings import load_settings
 from app.db import make_engine, init_db
+
 from app.ingest_f3x import run_f3x
 from app.ingest_ie import run_ie_schedule_e
+from app.ingest_sa import run_sa
 from app.email_service import send_filing_alert
 from app.repo import get_max_new_per_run, get_email_enabled, mark_tasks_emailed
 from app.schemas import AppConfig, FilingF3X, IEScheduleE
@@ -62,8 +65,23 @@ def run_job():
     start_time = time.time()
     iteration = 0
     total_f3x = 0
+    total_f3x_failed = 0
+    last_f3x_error = None
     total_ie_filings = 0
     total_ie_events = 0
+    total_sa_filings = 0
+    total_sa_events = 0
+
+    # Compute ET day bounds once for SA second-pass queries
+    ET = ZoneInfo("America/New_York")
+    today_et = datetime.now(timezone.utc).astimezone(ET).date()
+    sa_today_start = datetime.combine(
+        today_et, dtime(0, 0, 0), tzinfo=ET,
+    ).astimezone(timezone.utc)
+    sa_today_end = datetime.combine(
+        date.fromordinal(today_et.toordinal() + 1),
+        dtime(0, 0, 0), tzinfo=ET,
+    ).astimezone(timezone.utc)
 
     results = {
         "status": "running",
@@ -71,7 +89,10 @@ def run_job():
         "started_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
         "f3x_new": 0,
+        "f3x_failed": 0,
         "ie_events_new": 0,
+        "sa_filings": 0,
+        "sa_events": 0,
         "iterations": 0,
         "email_sent": False,
         "emails_sent_to": [],
@@ -97,15 +118,20 @@ def run_job():
                 # Run F3X ingestion
                 f3x_new = 0
                 try:
-                    f3x_new = run_f3x(
+                    f3x_result = run_f3x(
                         session,
                         feed_url=settings.f3x_feed,
                         receipts_threshold=settings.receipts_threshold,
                     )
+                    f3x_new = f3x_result.new_count
                     total_f3x += f3x_new
-                    log(f"F3X: {f3x_new} new filings this batch")
+                    total_f3x_failed += f3x_result.failed_count
+                    if f3x_result.last_error:
+                        last_f3x_error = f3x_result.last_error
+                    log(f"F3X: {f3x_new} new, {f3x_result.failed_count} failed this batch")
                 except Exception as e:
                     log(f"F3X error: {e}")
+                    last_f3x_error = str(e)
 
                 # Run IE ingestion
                 ie_filings = 0
@@ -121,13 +147,35 @@ def run_job():
                 except Exception as e:
                     log(f"IE error: {e}")
 
+                # Run SA second-pass (re-download target PAC filings for Schedule A)
+                try:
+                    sa_result = run_sa(
+                        session,
+                        today_start_utc=sa_today_start,
+                        today_end_utc=sa_today_end,
+                    )
+                    total_sa_filings += sa_result.filings_processed
+                    total_sa_events += sa_result.events_inserted
+                    log(f"SA: {sa_result.filings_processed} filings, "
+                        f"{sa_result.events_inserted} events this batch")
+                except Exception as e:
+                    log(f"SA error: {e}")
+
                 session.commit()
                 gc.collect()
 
             # Update status after each iteration
             results["f3x_new"] = total_f3x
+            results["f3x_failed"] = total_f3x_failed
             results["ie_events_new"] = total_ie_events
+            results["sa_filings"] = total_sa_filings
+            results["sa_events"] = total_sa_events
             results["iterations"] = iteration
+            if last_f3x_error:
+                results["f3x_error"] = (
+                    f"{total_f3x_failed} filing(s) failed: "
+                    f"{last_f3x_error}"
+                )
             save_job_status(engine, results)
 
             # Check if we're caught up (no new filings in this batch)
@@ -146,7 +194,9 @@ def run_job():
 
         elapsed = (time.time() - start_time) / 60
         log(f"Job complete in {elapsed:.1f} min over {iteration} iterations")
-        log(f"Totals: F3X={total_f3x}, IE filings={total_ie_filings}, IE events={total_ie_events}")
+        log(f"Totals: F3X={total_f3x}, IE filings={total_ie_filings}, "
+            f"IE events={total_ie_events}, SA filings={total_sa_filings}, "
+            f"SA events={total_sa_events}")
 
         # Send email if we found new high-value filings
         if total_f3x > 0 or total_ie_events > 0:
@@ -244,7 +294,8 @@ def run_job():
             except Exception as e:
                 log(f"Email error (non-fatal): {e}")
 
-        results["status"] = "success"
+        has_errors = total_f3x_failed > 0
+        results["status"] = "completed_with_errors" if has_errors else "success"
         results["completed_at"] = datetime.now(timezone.utc).isoformat()
         save_job_status(engine, results)
 

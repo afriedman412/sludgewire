@@ -17,7 +17,7 @@ from .db import make_engine, init_db
 from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob, AppConfig
 import json
 from .auth import verify_admin
-from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled
+from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled, get_sa_target_committee_ids
 
 # --- App + DB bootstrap ---
 settings = load_settings()
@@ -341,6 +341,9 @@ def config_page(
     # Get email_enabled setting
     email_enabled = get_email_enabled(session)
 
+    # Get SA target committee IDs
+    sa_target_committee_ids = get_sa_target_committee_ids(session)
+
     return templates.TemplateResponse(
         "config.html",
         {
@@ -351,6 +354,7 @@ def config_page(
             "last_cron_run": last_cron_run,
             "max_new_per_run": max_new_per_run,
             "email_enabled": email_enabled,
+            "sa_target_committee_ids": sa_target_committee_ids,
             "message": message,
             "message_type": message_type,
         },
@@ -485,6 +489,142 @@ def update_max_new_per_run(
 
     return RedirectResponse(
         url=f"/config?message=Max filings per run updated to {value}&message_type=success",
+        status_code=303,
+    )
+
+
+@app.post("/config/settings/sa_target_committee_ids")
+def update_sa_target_committee_ids(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    committee_ids: str = Form(default=""),
+):
+    """Update target PAC committee IDs for Schedule A parsing. Admin-only."""
+    cids = [c.strip() for c in committee_ids.split(",") if c.strip()]
+    value = json.dumps(cids) if cids else "[]"
+
+    config = session.get(AppConfig, "sa_target_committee_ids")
+    if config:
+        config.value = value
+        config.updated_at = datetime.now(timezone.utc)
+    else:
+        config = AppConfig(key="sa_target_committee_ids", value=value)
+    session.add(config)
+    session.commit()
+
+    label = f"{len(cids)} committee(s)" if cids else "none"
+    return RedirectResponse(
+        url=f"/config?message=SA target committees updated to {label}&message_type=success",
+        status_code=303,
+    )
+
+
+@app.post("/config/parse-sa")
+def parse_sa_for_filing(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    filing_id: int = Form(...),
+):
+    """Manually parse Schedule A items from a specific F3X filing."""
+    import gc
+    from .fec_parse import (
+        download_fec_text, parse_fec_filing,
+        extract_schedule_a_best_effort, sha256_hex, FileTooLargeError,
+    )
+    from .repo import claim_filing, update_filing_status, insert_sa_event
+    from .schemas import ScheduleA
+
+    # Look up the filing in filings_f3x
+    filing = session.get(FilingF3X, filing_id)
+    if not filing:
+        return RedirectResponse(
+            url=f"/config?message=Filing {filing_id} not found in filings_f3x&message_type=error",
+            status_code=303,
+        )
+
+    # Claim with source_feed="SA" — if already parsed, skip
+    already_done = not claim_filing(session, filing_id, source_feed="SA")
+    if already_done:
+        update_filing_status(session, filing_id, "SA", "claimed")
+
+    # Download full file
+    update_filing_status(session, filing_id, "SA", "downloading")
+    try:
+        fec_text = download_fec_text(filing.fec_url, max_size_mb=50)
+    except FileTooLargeError as e:
+        update_filing_status(
+            session, filing_id, "SA", "failed",
+            failed_step="downloading",
+            error_message=f"Too large: {e.size_mb:.1f}MB",
+        )
+        session.commit()
+        return RedirectResponse(
+            url=f"/config?message=Filing {filing_id} too large ({e.size_mb:.1f}MB)&message_type=error",
+            status_code=303,
+        )
+    except Exception as e:
+        update_filing_status(
+            session, filing_id, "SA", "failed",
+            failed_step="downloading", error_message=str(e)[:500],
+        )
+        session.commit()
+        return RedirectResponse(
+            url=f"/config?message=Download failed: {e}&message_type=error",
+            status_code=303,
+        )
+
+    update_filing_status(session, filing_id, "SA", "downloaded")
+
+    # Parse Schedule A items
+    update_filing_status(session, filing_id, "SA", "parsing")
+    try:
+        parsed = parse_fec_filing(fec_text)
+        count = 0
+        for raw_line, fields in extract_schedule_a_best_effort(fec_text, parsed=parsed):
+            event_id = sha256_hex(f"{filing_id}|{raw_line}")
+            event = ScheduleA(
+                event_id=event_id,
+                filing_id=filing_id,
+                committee_id=filing.committee_id,
+                committee_name=filing.committee_name,
+                form_type=filing.form_type,
+                report_type=filing.report_type,
+                coverage_from=filing.coverage_from,
+                coverage_through=filing.coverage_through,
+                filed_at_utc=filing.filed_at_utc,
+                contributor_name=fields["contributor_name"],
+                contributor_employer=fields["contributor_employer"],
+                contributor_occupation=fields["contributor_occupation"],
+                contribution_amount=fields["contribution_amount"],
+                contribution_date=fields["contribution_date"],
+                receipt_description=fields["receipt_description"],
+                contributor_type=fields["contributor_type"],
+                memo_text=fields["memo_text"],
+                fec_url=filing.fec_url,
+                raw_line=raw_line[:200],
+            )
+            if insert_sa_event(session, event):
+                count += 1
+
+        update_filing_status(session, filing_id, "SA", "ingested")
+        session.commit()
+    except Exception as e:
+        update_filing_status(
+            session, filing_id, "SA", "failed",
+            failed_step="parsing", error_message=str(e)[:500],
+        )
+        session.commit()
+        return RedirectResponse(
+            url=f"/config?message=Parse failed for {filing_id}: {e}&message_type=error",
+            status_code=303,
+        )
+    finally:
+        del fec_text
+        del parsed
+        gc.collect()
+
+    return RedirectResponse(
+        url=f"/config?message=Parsed {count} Schedule A items from filing {filing_id} ({filing.committee_name})&message_type=success",
         status_code=303,
     )
 
@@ -822,12 +962,17 @@ def cron_check_new(session: Session = Depends(get_session)):
         # Run F3X ingestion
         _log_memory("before_f3x_ingestion", results)
         try:
-            f3x_count = run_f3x(
+            f3x_result = run_f3x(
                 session,
                 feed_url=settings.f3x_feed,
                 receipts_threshold=settings.receipts_threshold,
             )
-            results["f3x_new"] = f3x_count
+            results["f3x_new"] = f3x_result.new_count
+            if f3x_result.failed_count > 0:
+                results["f3x_error"] = (
+                    f"{f3x_result.failed_count} filing(s) failed: "
+                    f"{f3x_result.last_error}"
+                )
         except Exception as e:
             results["f3x_error"] = str(e)
         _log_memory("after_f3x_ingestion", results)
