@@ -167,6 +167,33 @@ class ScheduleA(SQLModel, table=True):
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
 
 
+class DonorIndustry(SQLModel, table=True):
+    __tablename__ = "donor_industries"
+
+    contrib_id: str = Field(primary_key=True)
+    contrib_name: Optional[str] = None
+    name_upper: str = Field(index=True)
+    org_name: Optional[str] = None
+    real_code: Optional[str] = None
+    cat_name: Optional[str] = None
+    industry: Optional[str] = Field(default=None, index=True)
+    sector: Optional[str] = Field(default=None, index=True)
+
+
+class OrgIndustry(SQLModel, table=True):
+    __tablename__ = "org_industries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    org_name: Optional[str] = None
+    org_upper: str = Field(index=True)
+    cmte_id: Optional[str] = Field(default=None, index=True)
+    pac_short: Optional[str] = None
+    prim_code: Optional[str] = None
+    cat_name: Optional[str] = None
+    industry: Optional[str] = Field(default=None, index=True)
+    sector: Optional[str] = Field(default=None, index=True)
+
+
 class EmailRecipient(SQLModel, table=True):
     __tablename__ = "email_recipients"
 

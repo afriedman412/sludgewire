@@ -223,6 +223,22 @@
     </form>
 </div>
 
+<h2>PAC Groups (Category View)</h2>
+<div class="config-section">
+    <form method="POST" action="/config/settings/pac_groups">
+        <div class="form-row">
+            <textarea name="pac_groups_json" rows="20"
+                style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 0.85em; white-space: pre;">{{ pac_groups_json }}</textarea>
+        </div>
+        <div class="form-row" style="margin-top: 8px;">
+            <button type="submit">Save PAC Groups</button>
+        </div>
+        <p class="muted" style="font-size: 0.85em; margin-top: 8px;">
+            JSON array of groups. Each group: {"name": "...", "pacs": [{"name": "...", "committee_id": "..."}]}
+        </p>
+    </form>
+</div>
+
 <h2>Last Cron Run</h2>
 <div class="config-section">
     {% if last_cron_run %}

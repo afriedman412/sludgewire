@@ -253,3 +253,28 @@ def get_sa_target_committee_ids(session: Session) -> list[str]:
         except (json.JSONDecodeError, TypeError):
             pass
     return []
+
+
+def get_pac_groups(session: Session) -> list[dict]:
+    """Get PAC groups from AppConfig."""
+    config = session.get(AppConfig, "pac_groups")
+    if config and config.value:
+        try:
+            groups = json.loads(config.value)
+            if isinstance(groups, list):
+                return groups
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []
+
+
+def set_pac_groups(session: Session, groups: list[dict]) -> None:
+    """Save PAC groups to AppConfig as JSON."""
+    config = session.get(AppConfig, "pac_groups")
+    value = json.dumps(groups)
+    if config:
+        config.value = value
+        config.updated_at = datetime.now(timezone.utc)
+    else:
+        config = AppConfig(key="pac_groups", value=value)
+    session.add(config)

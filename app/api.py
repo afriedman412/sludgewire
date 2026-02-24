@@ -8,8 +8,10 @@ from pathlib import Path
 import threading
 
 from fastapi import FastAPI, Depends, Query, Request, Form
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import text
 from sqlmodel import Session, select, col
 
 from .settings import load_settings
@@ -17,7 +19,7 @@ from .db import make_engine, init_db
 from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob, AppConfig
 import json
 from .auth import verify_admin
-from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled, get_sa_target_committee_ids
+from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled, get_sa_target_committee_ids, get_pac_groups, set_pac_groups
 
 # --- App + DB bootstrap ---
 settings = load_settings()
@@ -25,6 +27,14 @@ engine = make_engine(settings)
 init_db(engine)
 
 app = FastAPI(title="FEC Monitor", version="0.2.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Rate-limiting for current-day ingestion (in-memory, resets on deploy)
 _last_ingestion_time: Optional[datetime] = None
@@ -297,6 +307,319 @@ def _get_memory_usage_mb() -> float:
         return 0.0
 
 
+# -------------------------
+# Category View API
+# -------------------------
+
+
+@app.get("/api/category/groups")
+def api_category_groups(session: Session = Depends(get_session)):
+    """All PAC groups with summary totals from schedule_a and ie_schedule_e."""
+    groups = get_pac_groups(session)
+    if not groups:
+        return {"groups": []}
+
+    result_groups = []
+    for group in groups:
+        group_name = group.get("name", "")
+        pacs = group.get("pacs", [])
+        committee_ids = [p["committee_id"] for p in pacs if "committee_id" in p]
+
+        if not committee_ids:
+            result_groups.append({
+                "name": group_name,
+                "pacs": pacs,
+                "total_contributions": 0,
+                "donor_count": 0,
+                "total_ie_spending": 0,
+            })
+            continue
+
+        sa_row = session.execute(text("""
+            SELECT
+                COALESCE(SUM(sa.contribution_amount), 0) AS total,
+                COUNT(DISTINCT sa.contributor_name) AS donors
+            FROM schedule_a sa
+            WHERE sa.committee_id = ANY(:ids)
+              AND sa.contribution_amount > 0
+        """), {"ids": committee_ids}).first()
+
+        ie_row = session.execute(text("""
+            SELECT COALESCE(SUM(ie.amount), 0) AS total
+            FROM ie_schedule_e ie
+            WHERE ie.committee_id = ANY(:ids)
+              AND ie.amount > 0
+        """), {"ids": committee_ids}).first()
+
+        result_groups.append({
+            "name": group_name,
+            "pacs": pacs,
+            "total_contributions": float(sa_row.total) if sa_row else 0,
+            "donor_count": int(sa_row.donors) if sa_row else 0,
+            "total_ie_spending": float(ie_row.total) if ie_row else 0,
+        })
+
+    return {"groups": result_groups}
+
+
+@app.get("/api/category/pac/{committee_id}/industries")
+def api_pac_industries(
+    committee_id: str,
+    session: Session = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    """Industry breakdown for a PAC's Schedule A contributions."""
+    rows = session.execute(text("""
+        SELECT
+            COALESCE(
+                NULLIF(o.industry, ''),
+                NULLIF(e.industry, ''),
+                NULLIF(d.industry, ''),
+                'Unclassified'
+            ) AS industry,
+            COALESCE(
+                NULLIF(o.sector, ''),
+                NULLIF(e.sector, ''),
+                NULLIF(d.sector, ''),
+                'Unclassified'
+            ) AS sector,
+            SUM(sa.contribution_amount) AS total_amount,
+            COUNT(*) AS contribution_count,
+            COUNT(DISTINCT sa.contributor_name) AS donor_count
+        FROM schedule_a sa
+        LEFT JOIN donor_industries d ON UPPER(sa.contributor_name) = d.name_upper
+        LEFT JOIN org_industries o ON UPPER(sa.contributor_name) = o.org_upper
+        LEFT JOIN org_industries e ON UPPER(sa.contributor_employer) = e.org_upper
+        WHERE sa.committee_id = :committee_id
+          AND sa.contribution_amount > 0
+        GROUP BY 1, 2
+        ORDER BY total_amount DESC
+        LIMIT :limit
+    """), {"committee_id": committee_id, "limit": limit}).all()
+
+    return {
+        "committee_id": committee_id,
+        "count": len(rows),
+        "results": [
+            {
+                "industry": r.industry,
+                "sector": r.sector,
+                "total_amount": float(r.total_amount) if r.total_amount else 0,
+                "contribution_count": r.contribution_count,
+                "donor_count": r.donor_count,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/api/category/pac/{committee_id}/donors")
+def api_pac_donors(
+    committee_id: str,
+    session: Session = Depends(get_session),
+    industry: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+):
+    """Top donors for a PAC with industry classification."""
+    params: dict[str, Any] = {"committee_id": committee_id, "limit": limit}
+
+    industry_filter = ""
+    if industry:
+        industry_filter = """
+        HAVING COALESCE(
+            NULLIF(MAX(o.industry), ''),
+            NULLIF(MAX(e.industry), ''),
+            NULLIF(MAX(d.industry), ''),
+            'Unclassified'
+        ) = :industry
+        """
+        params["industry"] = industry
+
+    rows = session.execute(text(f"""
+        SELECT
+            sa.contributor_name,
+            MAX(sa.contributor_employer) AS employer,
+            MAX(sa.contributor_occupation) AS occupation,
+            COALESCE(
+                NULLIF(MAX(o.industry), ''),
+                NULLIF(MAX(e.industry), ''),
+                NULLIF(MAX(d.industry), ''),
+                'Unclassified'
+            ) AS industry,
+            COALESCE(
+                NULLIF(MAX(o.sector), ''),
+                NULLIF(MAX(e.sector), ''),
+                NULLIF(MAX(d.sector), ''),
+                'Unclassified'
+            ) AS sector,
+            SUM(sa.contribution_amount) AS total_amount,
+            COUNT(*) AS contribution_count
+        FROM schedule_a sa
+        LEFT JOIN donor_industries d ON UPPER(sa.contributor_name) = d.name_upper
+        LEFT JOIN org_industries o ON UPPER(sa.contributor_name) = o.org_upper
+        LEFT JOIN org_industries e ON UPPER(sa.contributor_employer) = e.org_upper
+        WHERE sa.committee_id = :committee_id
+          AND sa.contribution_amount > 0
+        GROUP BY sa.contributor_name
+        {industry_filter}
+        ORDER BY total_amount DESC
+        LIMIT :limit
+    """), params).all()
+
+    return {
+        "committee_id": committee_id,
+        "count": len(rows),
+        "results": [
+            {
+                "contributor_name": r.contributor_name,
+                "employer": r.employer,
+                "occupation": r.occupation,
+                "industry": r.industry,
+                "sector": r.sector,
+                "total_amount": float(r.total_amount) if r.total_amount else 0,
+                "contribution_count": r.contribution_count,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/api/category/pac/{committee_id}/candidates")
+def api_pac_candidates(
+    committee_id: str,
+    session: Session = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    """IE spending by candidate for a PAC."""
+    rows = session.execute(text("""
+        SELECT
+            ie.candidate_id,
+            ie.candidate_name,
+            ie.candidate_party,
+            ie.candidate_office,
+            ie.candidate_state,
+            ie.candidate_district,
+            ie.support_oppose,
+            SUM(ie.amount) AS total_amount,
+            COUNT(*) AS expenditure_count
+        FROM ie_schedule_e ie
+        WHERE ie.committee_id = :committee_id
+          AND ie.amount > 0
+        GROUP BY
+            ie.candidate_id, ie.candidate_name,
+            ie.candidate_party, ie.candidate_office,
+            ie.candidate_state, ie.candidate_district,
+            ie.support_oppose
+        ORDER BY total_amount DESC
+        LIMIT :limit
+    """), {"committee_id": committee_id, "limit": limit}).all()
+
+    return {
+        "committee_id": committee_id,
+        "count": len(rows),
+        "results": [
+            {
+                "candidate_id": r.candidate_id,
+                "candidate_name": r.candidate_name,
+                "candidate_party": r.candidate_party,
+                "candidate_office": r.candidate_office,
+                "candidate_state": r.candidate_state,
+                "candidate_district": r.candidate_district,
+                "support_oppose": r.support_oppose,
+                "total_amount": float(r.total_amount) if r.total_amount else 0,
+                "expenditure_count": r.expenditure_count,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.get("/api/category/pac/{committee_id}/candidates/{candidate_id}/industries")
+def api_candidate_industry_attribution(
+    committee_id: str,
+    candidate_id: str,
+    session: Session = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    """Attributed industry spending for a candidate from a PAC."""
+    # Total contributions to this PAC
+    total_row = session.execute(text("""
+        SELECT COALESCE(SUM(contribution_amount), 0) AS total
+        FROM schedule_a
+        WHERE committee_id = :committee_id
+          AND contribution_amount > 0
+    """), {"committee_id": committee_id}).first()
+
+    total_contributions = float(total_row.total) if total_row and total_row.total else 0
+
+    if total_contributions == 0:
+        return {
+            "committee_id": committee_id,
+            "candidate_id": candidate_id,
+            "total_contributions": 0,
+            "total_ie_spending": 0,
+            "results": [],
+        }
+
+    # IE spending on this candidate
+    ie_row = session.execute(text("""
+        SELECT COALESCE(SUM(amount), 0) AS total_ie
+        FROM ie_schedule_e
+        WHERE committee_id = :committee_id
+          AND candidate_id = :candidate_id
+          AND amount > 0
+    """), {"committee_id": committee_id, "candidate_id": candidate_id}).first()
+
+    total_ie = float(ie_row.total_ie) if ie_row else 0
+
+    # Industry breakdown with proportional attribution
+    rows = session.execute(text("""
+        SELECT
+            COALESCE(
+                NULLIF(o.industry, ''),
+                NULLIF(e.industry, ''),
+                NULLIF(d.industry, ''),
+                'Unclassified'
+            ) AS industry,
+            COALESCE(
+                NULLIF(o.sector, ''),
+                NULLIF(e.sector, ''),
+                NULLIF(d.sector, ''),
+                'Unclassified'
+            ) AS sector,
+            SUM(sa.contribution_amount) AS industry_contributions,
+            COUNT(DISTINCT sa.contributor_name) AS donor_count
+        FROM schedule_a sa
+        LEFT JOIN donor_industries d ON UPPER(sa.contributor_name) = d.name_upper
+        LEFT JOIN org_industries o ON UPPER(sa.contributor_name) = o.org_upper
+        LEFT JOIN org_industries e ON UPPER(sa.contributor_employer) = e.org_upper
+        WHERE sa.committee_id = :committee_id
+          AND sa.contribution_amount > 0
+        GROUP BY 1, 2
+        ORDER BY industry_contributions DESC
+        LIMIT :limit
+    """), {"committee_id": committee_id, "limit": limit}).all()
+
+    return {
+        "committee_id": committee_id,
+        "candidate_id": candidate_id,
+        "total_contributions": total_contributions,
+        "total_ie_spending": total_ie,
+        "count": len(rows),
+        "results": [
+            {
+                "industry": r.industry,
+                "sector": r.sector,
+                "industry_contributions": float(r.industry_contributions),
+                "contribution_share": float(r.industry_contributions) / total_contributions,
+                "attributed_ie_spending": (float(r.industry_contributions) / total_contributions) * total_ie,
+                "donor_count": r.donor_count,
+            }
+            for r in rows
+        ],
+    }
+
+
 @app.get("/config", response_class=HTMLResponse)
 def config_page(
     request: Request,
@@ -344,6 +667,10 @@ def config_page(
     # Get SA target committee IDs
     sa_target_committee_ids = get_sa_target_committee_ids(session)
 
+    # Get PAC groups
+    pac_groups = get_pac_groups(session)
+    pac_groups_json = json.dumps(pac_groups, indent=2) if pac_groups else "[]"
+
     return templates.TemplateResponse(
         "config.html",
         {
@@ -355,6 +682,7 @@ def config_page(
             "max_new_per_run": max_new_per_run,
             "email_enabled": email_enabled,
             "sa_target_committee_ids": sa_target_committee_ids,
+            "pac_groups_json": pac_groups_json,
             "message": message,
             "message_type": message_type,
         },
@@ -519,6 +847,30 @@ def update_sa_target_committee_ids(
     )
 
 
+@app.post("/config/settings/pac_groups")
+def update_pac_groups(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    pac_groups_json: str = Form(...),
+):
+    """Update PAC groups config. Expects JSON string."""
+    try:
+        groups = json.loads(pac_groups_json)
+        if not isinstance(groups, list):
+            raise ValueError("Must be a JSON array")
+        set_pac_groups(session, groups)
+        session.commit()
+        return RedirectResponse(
+            url=f"/config?message=PAC groups updated ({len(groups)} groups)&message_type=success",
+            status_code=303,
+        )
+    except (json.JSONDecodeError, ValueError) as e:
+        return RedirectResponse(
+            url=f"/config?message=Invalid JSON: {e}&message_type=error",
+            status_code=303,
+        )
+
+
 @app.post("/config/parse-sa")
 def parse_sa_for_filing(
     session: Session = Depends(get_session),
@@ -545,7 +897,10 @@ def parse_sa_for_filing(
     # Claim with source_feed="SA" — if already parsed, skip
     already_done = not claim_filing(session, filing_id, source_feed="SA")
     if already_done:
-        update_filing_status(session, filing_id, "SA", "claimed")
+        return RedirectResponse(
+            url=f"/config?message=Filing {filing_id} already processed for Schedule A&message_type=error",
+            status_code=303,
+        )
 
     # Download full file
     update_filing_status(session, filing_id, "SA", "downloading")

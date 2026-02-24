@@ -148,6 +148,77 @@ Dashboard nav links are date-aware — clicking "3X Dashboard" or "Schedule E Da
 - `POST /config/recipients/{id}/delete` - Remove recipient
 - `POST /config/backfill/{year}/{month}/{day}/{type}` - Trigger manual backfill
 
+## Issue Map Integration (Category View API)
+
+The **Issue Map** project (`~/Documents/code/issue_map/`) is a campaign finance visualization frontend that needs API endpoints from this app to power its "Category View" — a browse-by-category interface showing themed PAC groups, their industry breakdowns, and candidate spending.
+
+### What needs to be built
+
+#### 1. Load OpenSecrets industry lookup tables into Postgres
+
+The Issue Map project has two CSV files with industry classifications:
+- `~/Documents/code/issue_map/data/donors_by_industry.csv` — individual donor → industry (columns: `ContribID`, `Contrib`, `Orgname`, `RealCode`, `Catname`, `Industry`, `Sector`, `FECTransIDs`)
+- `~/Documents/code/issue_map/data/orgs_by_industry.csv` — organization → industry (columns: `CmteID`, `Org`, `PACShort`, `PrimCode`, `Catname`, `Industry`, `Sector`)
+
+Create two new tables in Postgres:
+- `donor_industries` — with a `name_upper` column (UPPER of donor name) indexed for fast joins
+- `org_industries` — with an `org_upper` column (UPPER of org name) indexed for fast joins
+
+Write a loader script (like `scripts/ingest_comms.py`) that reads these CSVs and loads them. Add SQLModel schemas to `app/schemas.py`.
+
+#### 2. PAC groups configuration
+
+Store themed PAC groups as JSONB in `app_config` with key `pac_groups`. The groups:
+
+- **Pro-Israel**: UDP (C00799031), DMFI (C00710848)
+- **Pro-Trump**: MAGA Inc. (C00825851), AmericaPAC (C00879510), Preserve America (C00878801), American Crossroads (C00487363), Right for America (C00867036), Restoration PAC (C00571588)
+- **Crypto**: Fairshake (C00835959), Protect Progress (C00848440), Defend American Jobs (C00836221), Digital Freedom Fund (C00911610)
+- **AI**: Leading the Future (C00916114), Think Big (C00923417), American Mission (C00916692), Public First (C00930503), Defending our Values (C00928390), Jobs and Democracy (C00928374)
+
+Make editable via `/config` page and exposed via the API.
+
+#### 3. API endpoints for Category View
+
+Add to `app/api.py`:
+
+**`GET /api/category/groups`** — All PAC groups with summary totals (total receipts + total IE per group, aggregated from `schedule_a` and `ie_schedule_e`).
+
+**`GET /api/category/pac/{committee_id}/industries`** — Industry breakdown for a PAC. Joins `schedule_a` against industry lookup tables using the matching strategy below. Returns list of industries with total amount, percentage, and donor count.
+
+**`GET /api/category/pac/{committee_id}/donors`** — Top donors for a PAC. Query params: `industry` (filter), `sort` (amount|date|name), `order` (desc|asc), `limit` (default 50).
+
+**`GET /api/category/pac/{committee_id}/candidates`** — IE spending by candidate from `ie_schedule_e`. Group by candidate_id, sum amounts, include party/state/office/support_oppose. Sortable by amount, state, name.
+
+**`GET /api/category/pac/{committee_id}/candidates/{candidate_id}/industries`** — Attributed industry spending for a candidate. Uses PAC's industry breakdown percentages applied to the IE amount for that candidate.
+
+#### 4. CORS
+
+Add CORS middleware to allow cross-origin requests from the Issue Map frontend (use `*` for dev).
+
+### Industry matching SQL pattern
+
+Core join for attributing industries to `schedule_a` receipts:
+```sql
+COALESCE(
+    NULLIF(o.industry, ''),   -- org match on contributor_name
+    NULLIF(d.industry, ''),   -- donor match on contributor_name
+    NULLIF(e.industry, ''),   -- employer match on contributor_employer
+    'Unclassified'
+) AS industry
+FROM schedule_a sa
+LEFT JOIN donor_industries d ON UPPER(sa.contributor_name) = d.name_upper
+LEFT JOIN org_industries o ON UPPER(sa.contributor_name) = o.org_upper
+LEFT JOIN org_industries e ON UPPER(sa.contributor_employer) = e.org_upper
+```
+
+Priority: org match > donor name match > employer match > Unclassified.
+
+### Current data status (Feb 2026)
+
+9 of 18 PACs have schedule_a data: DMFI (304), MAGA Inc. (47), UDP (43), Restoration PAC (36), AmericaPAC (25), Preserve America (11), Right for America (7), Protect Progress (4), Fairshake (3).
+
+Ensure all 18 PAC IDs are in the `sa_target_committee_ids` config so new filings get parsed.
+
 ## TODO / Known Issues
 
 ### Recovering Failed Filings
