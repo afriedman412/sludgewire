@@ -87,3 +87,7 @@ docs/build/*
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# One-off utility scripts (contain credentials)
+scripts/bulk_backfill.sh
+scripts/retry_failed.sh

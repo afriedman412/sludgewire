@@ -326,6 +326,119 @@ def extract_schedule_e_best_effort(fec_text: str, parsed: dict = None) -> Iterab
         }
 
 
+def extract_schedule_a_best_effort(fec_text: str, parsed: dict = None) -> Iterable[Tuple[str, dict]]:
+    """
+    Yields (raw_line, extracted_fields_dict) for Schedule A items.
+
+    Uses fecfile parsed output for structured field extraction.
+    Falls back to raw line parsing if fecfile fails.
+    """
+    try:
+        if parsed is None:
+            parsed = _get_fecfile().loads(fec_text)
+        itemizations = parsed.get("itemizations", {})
+
+        sa_items = itemizations.get(
+            "Schedule A", []) or itemizations.get("SA", [])
+
+        for item in sa_items:
+            raw_line = "|".join(str(v) for v in item.values() if v)
+
+            # Build contributor name (org or individual)
+            org_name = item.get("contributor_organization_name", "")
+            if org_name and org_name.strip():
+                contributor_name = org_name.strip()
+            else:
+                name_parts = [
+                    item.get("contributor_first_name", ""),
+                    item.get("contributor_middle_name", ""),
+                    item.get("contributor_last_name", ""),
+                ]
+                contributor_name = " ".join(
+                    p.strip() for p in name_parts if p and p.strip())
+                suffix = item.get("contributor_suffix", "")
+                if suffix and suffix.strip():
+                    contributor_name += f" {suffix.strip()}"
+
+            # Extract amount
+            amount = None
+            for amount_field in ("contribution_amount", "contribution_receipt_amount"):
+                amount_val = item.get(amount_field)
+                if amount_val is not None:
+                    try:
+                        amount = float(amount_val)
+                        break
+                    except (TypeError, ValueError):
+                        pass
+
+            # Extract date
+            contribution_date = None
+            for date_field in ("contribution_date", "contribution_receipt_date"):
+                val = item.get(date_field)
+                if val:
+                    if isinstance(val, datetime):
+                        contribution_date = val.date()
+                    elif isinstance(val, date):
+                        contribution_date = val
+                    elif isinstance(val, str):
+                        contribution_date = _parse_date_flexible(val)
+                    if contribution_date:
+                        break
+
+            yield raw_line, {
+                "contributor_name": contributor_name or None,
+                "contributor_employer": (item.get("contributor_employer") or "").strip() or None,
+                "contributor_occupation": (item.get("contributor_occupation") or "").strip() or None,
+                "contribution_amount": amount,
+                "contribution_date": contribution_date,
+                "receipt_description": (item.get("receipt_description") or "").strip() or None,
+                "contributor_type": item.get("entity_type"),
+                "memo_text": (item.get("memo_text_description") or item.get("memo_text") or "").strip() or None,
+            }
+
+        if sa_items:
+            return
+
+    except Exception:
+        pass
+
+    # Fallback: raw line parsing for SA records
+    for row in iter_pipe_rows(fec_text):
+        rec = row[0]
+        if not rec.startswith("SA"):
+            continue
+
+        raw_line = "|".join(row)
+
+        amount = None
+        contribution_date = None
+        for token in row:
+            if contribution_date is None:
+                d = _parse_mmddyyyy(token)
+                if d:
+                    contribution_date = d
+            if amount is None:
+                t = token.replace(",", "").strip()
+                if re.fullmatch(r"-?\d+(\.\d+)?", t):
+                    try:
+                        val = float(t)
+                        if abs(val) >= 0.01:
+                            amount = val
+                    except ValueError:
+                        pass
+
+        yield raw_line, {
+            "contributor_name": None,
+            "contributor_employer": None,
+            "contributor_occupation": None,
+            "contribution_amount": amount,
+            "contribution_date": contribution_date,
+            "receipt_description": None,
+            "contributor_type": None,
+            "memo_text": None,
+        }
+
+
 def _parse_date_flexible(s: str) -> Optional[date]:
     """Parse date from various formats."""
     if not s:

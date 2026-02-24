@@ -135,6 +135,38 @@ class IEScheduleE(SQLModel, table=True):
     emailed_at: Optional[datetime] = Field(default=None)
 
 
+class ScheduleA(SQLModel, table=True):
+    __tablename__ = "schedule_a"
+
+    event_id: str = Field(primary_key=True)  # SHA256("{filing_id}|{raw_line}")
+
+    filing_id: int = Field(sa_column=Column(
+        BigInteger, index=True, nullable=False))
+    committee_id: str = Field(index=True)
+    committee_name: Optional[str] = Field(default=None)
+    form_type: Optional[str] = None
+    report_type: Optional[str] = None
+
+    coverage_from: Optional[date] = None
+    coverage_through: Optional[date] = None
+    filed_at_utc: Optional[datetime] = Field(default=None, index=True)
+
+    # Contributor fields (no city/state/zip)
+    contributor_name: Optional[str] = Field(default=None, index=True)
+    contributor_employer: Optional[str] = None
+    contributor_occupation: Optional[str] = None
+    contribution_amount: Optional[float] = Field(default=None, index=True)
+    contribution_date: Optional[date] = Field(default=None, index=True)
+    receipt_description: Optional[str] = None
+    contributor_type: Optional[str] = None    # entity_type: IND, ORG, COM
+    memo_text: Optional[str] = None
+
+    fec_url: Optional[str] = None
+    raw_line: str = Field(sa_column=Column(Text, nullable=False))
+
+    first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
+
+
 class EmailRecipient(SQLModel, table=True):
     __tablename__ = "email_recipients"
 

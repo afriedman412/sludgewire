@@ -189,6 +189,40 @@
     </form>
 </div>
 
+<h2>Schedule A Tracking</h2>
+<div class="config-section">
+    <form method="POST" action="/config/settings/sa_target_committee_ids">
+        <div class="form-row">
+            <label for="sa_target_committee_ids" style="flex: 0 0 auto; padding: 8px 0;">
+                Target PAC Committee IDs:
+            </label>
+        </div>
+        <div class="form-row">
+            <textarea name="committee_ids" id="sa_target_committee_ids"
+                rows="4"
+                style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 0.85em;"
+                placeholder="C00813006, C00401224, ...">{{ sa_target_committee_ids | join(', ') }}</textarea>
+            <button type="submit">Update</button>
+        </div>
+        <p class="muted" style="font-size: 0.85em; margin-top: 8px;">
+            Comma-separated FEC committee IDs. Schedule A items will only be parsed from F3X filings by these committees.
+            Currently tracking {{ sa_target_committee_ids | length }} committee(s).
+        </p>
+    </form>
+
+    <h3 style="margin-top: 24px;">Parse Single Filing</h3>
+    <form method="POST" action="/config/parse-sa">
+        <div class="form-row">
+            <input type="number" name="filing_id" placeholder="Filing ID" required
+                style="width: 180px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+            <button type="submit">Parse Schedule A</button>
+        </div>
+        <p class="muted" style="font-size: 0.85em; margin-top: 8px;">
+            Manually parse Schedule A items from any F3X filing (must already be ingested).
+        </p>
+    </form>
+</div>
+
 <h2>Last Cron Run</h2>
 <div class="config-section">
     {% if last_cron_run %}
@@ -217,6 +251,8 @@
                 &bull;
                 IE Events: {{ last_cron_run.ie_events_new }} new
                 {% if last_cron_run.ie_error %}<span style="color: #dc3545;"> (error)</span>{% endif %}
+                &bull;
+                SA: {{ last_cron_run.sa_filings|default(0) }} filings, {{ last_cron_run.sa_events|default(0) }} events
             </dd>
 
             <dt>Email</dt>
