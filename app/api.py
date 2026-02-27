@@ -496,9 +496,9 @@ def api_pac_candidates(
     rows = session.execute(text("""
         SELECT
             ie.candidate_id,
-            ie.candidate_name,
-            ie.candidate_party,
-            ie.candidate_office,
+            MAX(ie.candidate_name) AS candidate_name,
+            MAX(ie.candidate_party) AS candidate_party,
+            MAX(ie.candidate_office) AS candidate_office,
             ie.candidate_state,
             ie.candidate_district,
             ie.support_oppose,
@@ -510,8 +510,7 @@ def api_pac_candidates(
         WHERE ie.committee_id = :committee_id
           AND ie.amount > 0
         GROUP BY
-            ie.candidate_id, ie.candidate_name,
-            ie.candidate_party, ie.candidate_office,
+            ie.candidate_id,
             ie.candidate_state, ie.candidate_district,
             ie.support_oppose
         ORDER BY total_amount DESC
