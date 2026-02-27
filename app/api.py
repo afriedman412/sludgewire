@@ -440,6 +440,7 @@ def api_pac_donors(
             sa.contributor_name,
             MAX(sa.contributor_employer) AS employer,
             MAX(sa.contributor_occupation) AS occupation,
+            MAX(sa.contributor_type) AS contributor_type,
             COALESCE(
                 NULLIF(MAX(o.industry), ''),
                 NULLIF(MAX(e.industry), ''),
@@ -474,6 +475,7 @@ def api_pac_donors(
                 "contributor_name": r.contributor_name,
                 "employer": r.employer,
                 "occupation": r.occupation,
+                "contributor_type": r.contributor_type,
                 "industry": r.industry,
                 "sector": r.sector,
                 "total_amount": float(r.total_amount) if r.total_amount else 0,
@@ -501,7 +503,9 @@ def api_pac_candidates(
             ie.candidate_district,
             ie.support_oppose,
             SUM(ie.amount) AS total_amount,
-            COUNT(*) AS expenditure_count
+            COUNT(*) AS expenditure_count,
+            MAX(COALESCE(ie.expenditure_date, ie.filed_at_utc::date)) AS latest_date,
+            MIN(COALESCE(ie.expenditure_date, ie.filed_at_utc::date)) AS earliest_date
         FROM ie_schedule_e ie
         WHERE ie.committee_id = :committee_id
           AND ie.amount > 0
@@ -528,6 +532,8 @@ def api_pac_candidates(
                 "support_oppose": r.support_oppose,
                 "total_amount": float(r.total_amount) if r.total_amount else 0,
                 "expenditure_count": r.expenditure_count,
+                "latest_date": str(r.latest_date) if r.latest_date else None,
+                "earliest_date": str(r.earliest_date) if r.earliest_date else None,
             }
             for r in rows
         ],
