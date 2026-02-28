@@ -52,6 +52,18 @@ def _log_mem(label: str):
         pass
 
 
+def _record_failure(session: Session, filing_id: int, failed_step: str, error_message: str):
+    """Record a failed SA ingestion after a rollback wiped the claimed row."""
+    session.add(IngestionTask(
+        filing_id=filing_id,
+        source_feed="SA",
+        status="failed",
+        failed_step=failed_step,
+        error_message=error_message,
+    ))
+    session.commit()
+
+
 def run_sa(
     session: Session,
 ) -> SAResult:
@@ -119,10 +131,8 @@ def run_sa(
             continue
         except Exception as e:
             print(f"[SA] Download failed for {filing_id}: {e}")
-            update_filing_status(
-                session, filing_id, "SA", "failed",
-                failed_step="downloading", error_message=str(e)[:500],
-            )
+            session.rollback()
+            _record_failure(session, filing_id, "downloading", str(e)[:500])
             result.failed_count += 1
             result.last_error = str(e)[:500]
             continue
@@ -173,10 +183,8 @@ def run_sa(
 
         except Exception as e:
             print(f"[SA] Failed to process {filing_id}: {e}")
-            update_filing_status(
-                session, filing_id, "SA", "failed",
-                failed_step="parsing", error_message=str(e)[:500],
-            )
+            session.rollback()
+            _record_failure(session, filing_id, "parsing", str(e)[:500])
             result.failed_count += 1
             result.last_error = str(e)[:500]
             continue
