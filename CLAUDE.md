@@ -27,7 +27,7 @@ Required GitHub secrets: `GCP_PROJECT_ID`, `GCP_SA_KEY`, `POSTGRES_URL`, `GOOGLE
 
 ```bash
 # Start Cloud SQL proxy (port 5433)
-cloud-sql-proxy freeway2026:us-central1:fec-db
+cloud-sql- freeway2026:us-central1:fec-db
 
 # Run app (reads .env for POSTGRES_URL, etc.)
 uvicorn app.main:app --reload --port 8080

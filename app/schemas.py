@@ -167,6 +167,19 @@ class ScheduleA(SQLModel, table=True):
     first_seen_utc: datetime = Field(default_factory=datetime.utcnow)
 
 
+class RaceCandidate(SQLModel, table=True):
+    """FEC candidate data for races with IE spending — includes opponents."""
+    __tablename__ = "race_candidates"
+
+    candidate_id: str = Field(primary_key=True)
+    candidate_name: Optional[str] = None
+    party: Optional[str] = None
+    state: Optional[str] = Field(default=None, index=True)
+    office: Optional[str] = None  # S or H
+    district: Optional[str] = None
+    has_ie_spending: bool = Field(default=False)  # True if in ie_schedule_e
+
+
 class DonorIndustry(SQLModel, table=True):
     __tablename__ = "donor_industries"
 

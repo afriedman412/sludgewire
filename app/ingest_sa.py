@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import gc
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Session, select
+from sqlalchemy import exists
 
 from .fec_parse import (
     download_fec_text, parse_fec_filing,
@@ -24,7 +24,7 @@ from .repo import (
     claim_filing, update_filing_status, insert_sa_event,
     get_sa_target_committee_ids, get_max_new_per_run, record_skipped_filing,
 )
-from .schemas import FilingF3X, ScheduleA
+from .schemas import FilingF3X, IngestionTask, ScheduleA
 
 MAX_FILE_SIZE_MB = 50
 
@@ -54,16 +54,13 @@ def _log_mem(label: str):
 
 def run_sa(
     session: Session,
-    *,
-    today_start_utc: datetime,
-    today_end_utc: datetime,
 ) -> SAResult:
     """
     Second-pass Schedule A ingestion.
 
-    Queries filings_f3x for today's filings from target committees,
-    downloads the full FEC file (one at a time), parses Schedule A
-    items, and inserts them.
+    Finds all F3X filings from target committees that don't yet have
+    an SA ingestion task, downloads the full FEC file (one at a time),
+    parses Schedule A items, and inserts them.
     """
     result = SAResult()
 
@@ -74,17 +71,21 @@ def run_sa(
 
     max_per_run = get_max_new_per_run(session)
 
-    # Find today's F3X filings from target committees
+    # Find target PAC F3X filings with no SA ingestion task yet
+    sa_exists = exists(
+        select(IngestionTask.filing_id)
+        .where(IngestionTask.filing_id == FilingF3X.filing_id)
+        .where(IngestionTask.source_feed == "SA")
+    )
     stmt = (
         select(FilingF3X)
-        .where(FilingF3X.filed_at_utc >= today_start_utc)
-        .where(FilingF3X.filed_at_utc < today_end_utc)
         .where(FilingF3X.committee_id.in_(target_ids))
+        .where(~sa_exists)
         .order_by(FilingF3X.filed_at_utc.desc())
     )
     filings = session.exec(stmt).all()
-    print(f"[SA] Found {len(filings)} F3X filings from "
-          f"{len(target_ids)} target committees today")
+    print(f"[SA] Found {len(filings)} unprocessed F3X filings from "
+          f"{len(target_ids)} target committees")
 
     for filing in filings:
         if result.filings_processed >= max_per_run:

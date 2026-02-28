@@ -539,6 +539,50 @@ def api_pac_candidates(
     }
 
 
+@app.get("/api/races/{state}/{race_key}/candidates")
+def api_race_candidates(
+    state: str,
+    race_key: str,
+    session: Session = Depends(get_session),
+):
+    """All known candidates for a race (state+office+district), including opponents
+    with no IE spending. race_key format: 'SEN' or '01', '02', etc."""
+    state = state.upper()
+    if race_key.upper() == "SEN":
+        office = "S"
+        district = ""
+    else:
+        office = "H"
+        district = race_key.zfill(2)
+
+    rows = session.execute(text("""
+        SELECT candidate_id, candidate_name, party, state, office, district,
+               has_ie_spending
+        FROM race_candidates
+        WHERE state = :state AND office = :office
+          AND (:district = '' OR district = :district OR district = '')
+        ORDER BY has_ie_spending DESC, party, candidate_name
+    """), {"state": state, "office": office, "district": district}).all()
+
+    return {
+        "state": state,
+        "race_key": race_key,
+        "count": len(rows),
+        "results": [
+            {
+                "candidate_id": r.candidate_id,
+                "candidate_name": r.candidate_name,
+                "party": r.party,
+                "state": r.state,
+                "office": r.office,
+                "district": r.district,
+                "has_ie_spending": r.has_ie_spending,
+            }
+            for r in rows
+        ],
+    }
+
+
 @app.get("/api/category/pac/{committee_id}/candidates/{candidate_id}/industries")
 def api_candidate_industry_attribution(
     committee_id: str,

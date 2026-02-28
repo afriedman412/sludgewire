@@ -10,8 +10,7 @@ import gc
 import json
 import sys
 import time
-from datetime import date, datetime, time as dtime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
@@ -71,17 +70,6 @@ def run_job():
     total_ie_events = 0
     total_sa_filings = 0
     total_sa_events = 0
-
-    # Compute ET day bounds once for SA second-pass queries
-    ET = ZoneInfo("America/New_York")
-    today_et = datetime.now(timezone.utc).astimezone(ET).date()
-    sa_today_start = datetime.combine(
-        today_et, dtime(0, 0, 0), tzinfo=ET,
-    ).astimezone(timezone.utc)
-    sa_today_end = datetime.combine(
-        date.fromordinal(today_et.toordinal() + 1),
-        dtime(0, 0, 0), tzinfo=ET,
-    ).astimezone(timezone.utc)
 
     results = {
         "status": "running",
@@ -149,11 +137,7 @@ def run_job():
 
                 # Run SA second-pass (re-download target PAC filings for Schedule A)
                 try:
-                    sa_result = run_sa(
-                        session,
-                        today_start_utc=sa_today_start,
-                        today_end_utc=sa_today_end,
-                    )
+                    sa_result = run_sa(session)
                     total_sa_filings += sa_result.filings_processed
                     total_sa_events += sa_result.events_inserted
                     log(f"SA: {sa_result.filings_processed} filings, "
