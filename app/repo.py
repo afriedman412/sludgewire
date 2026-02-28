@@ -48,16 +48,14 @@ def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
         return False
 
     try:
-        session.begin_nested()
-        session.add(IngestionTask(
-            filing_id=filing_id,
-            source_feed=source_feed,
-            status="claimed",
-        ))
-        session.flush()
+        with session.begin_nested():
+            session.add(IngestionTask(
+                filing_id=filing_id,
+                source_feed=source_feed,
+                status="claimed",
+            ))
         return True
     except Exception:
-        session.rollback()
         return False
 
 
