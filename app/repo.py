@@ -213,12 +213,10 @@ def insert_ie_event(session: Session, event: IEScheduleE) -> bool:
     if existing:
         return False
     try:
-        session.begin_nested()
-        session.add(event)
-        session.flush()
+        with session.begin_nested():
+            session.add(event)
         return True
     except Exception:
-        session.rollback()
         return False
 
 
@@ -231,12 +229,10 @@ def insert_sa_event(session: Session, event: ScheduleA) -> bool:
     if existing:
         return False
     try:
-        session.begin_nested()
-        session.add(event)
-        session.flush()
+        with session.begin_nested():
+            session.add(event)
         return True
     except Exception:
-        session.rollback()
         return False
 
 
