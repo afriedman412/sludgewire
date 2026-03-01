@@ -22,7 +22,8 @@ from .fec_parse import (
 )
 from .repo import (
     claim_filing, update_filing_status, insert_sa_event,
-    get_sa_target_committee_ids, get_max_new_per_run, record_skipped_filing,
+    get_sa_target_committee_ids, get_pac_groups, get_max_new_per_run,
+    record_skipped_filing,
 )
 from .schemas import FilingF3X, IngestionTask, ScheduleA
 
@@ -76,10 +77,23 @@ def run_sa(
     """
     result = SAResult()
 
-    target_ids = get_sa_target_committee_ids(session)
+    # Always include all PAC groups, plus any additional SA targets
+    target_set: set[str] = set()
+    pac_groups = get_pac_groups(session)
+    for group in pac_groups:
+        for pac in group.get("pacs", []):
+            cid = pac.get("committee_id", "").strip()
+            if cid:
+                target_set.add(cid)
+    extra_ids = get_sa_target_committee_ids(session)
+    target_set.update(extra_ids)
+    target_ids = list(target_set)
     if not target_ids:
-        print("[SA] No target committee IDs configured, skipping")
+        print("[SA] No PAC groups or SA targets configured, skipping")
         return result
+    print(f"[SA] Targeting {len(target_ids)} committees "
+          f"({len(target_ids) - len(extra_ids)} from PAC groups"
+          f"{f', {len(extra_ids)} additional' if extra_ids else ''})")
 
     max_per_run = get_max_new_per_run(session)
 

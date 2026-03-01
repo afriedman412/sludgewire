@@ -7,7 +7,11 @@ from sqlmodel import Session
 from .feeds import fetch_rss_items, infer_filing_id, parse_mmddyyyy
 from .fec_lookup import resolve_committee_name
 from .fec_parse import download_fec_text, parse_fec_filing, extract_committee_name, extract_schedule_e_best_effort, sha256_hex, FileTooLargeError
-from .repo import claim_filing, update_filing_status, insert_ie_event, get_max_new_per_run, record_skipped_filing
+from .repo import (
+    claim_filing, update_filing_status, insert_ie_event,
+    get_max_new_per_run, record_skipped_filing,
+    sync_race_candidates_from_ie,
+)
 from .schemas import IEScheduleE
 
 MAX_FILE_SIZE_MB = 50  # Skip files larger than this
@@ -129,5 +133,12 @@ def run_ie_schedule_e(session: Session, *, feed_urls: list[str]) -> tuple[int, i
         # Break outer loop too if limit reached
         if new_filings >= max_per_run:
             break
+
+    # Keep race_candidates in sync with IE data
+    if new_events > 0:
+        try:
+            sync_race_candidates_from_ie(session)
+        except Exception as e:
+            print(f"[IE] race_candidates sync error: {e}")
 
     return new_filings, new_events

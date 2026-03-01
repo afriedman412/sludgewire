@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 import json
 
-from .schemas import IngestionTask, FilingF3X, IEScheduleE, ScheduleA, AppConfig
+from .schemas import IngestionTask, FilingF3X, IEScheduleE, ScheduleA, AppConfig, RaceCandidate
 
 
 # Default values for configurable settings
@@ -272,3 +272,50 @@ def set_pac_groups(session: Session, groups: list[dict]) -> None:
     else:
         config = AppConfig(key="pac_groups", value=value)
     session.add(config)
+
+
+def sync_race_candidates_from_ie(session: Session) -> int:
+    """Upsert IE candidates into race_candidates after IE ingestion.
+
+    Ensures every candidate with IE spending is in race_candidates.
+    Opponent lookup happens lazily via the /api/races endpoint.
+    """
+    from sqlalchemy import text
+
+    added = 0
+    ie_rows = session.execute(text("""
+        SELECT candidate_id,
+               MAX(candidate_name) AS name,
+               MAX(candidate_party) AS party,
+               MAX(candidate_state) AS state,
+               MAX(candidate_office) AS office,
+               MAX(candidate_district) AS district
+        FROM ie_schedule_e
+        WHERE candidate_id IS NOT NULL AND amount > 0
+        GROUP BY candidate_id
+    """)).all()
+
+    for row in ie_rows:
+        existing = session.get(RaceCandidate, row.candidate_id)
+        if existing:
+            if not existing.has_ie_spending:
+                existing.has_ie_spending = True
+                session.add(existing)
+            if not existing.party and row.party:
+                existing.party = row.party
+                session.add(existing)
+            continue
+        session.add(RaceCandidate(
+            candidate_id=row.candidate_id,
+            candidate_name=row.name,
+            party=row.party,
+            state=row.state,
+            office=row.office,
+            district=row.district or "",
+            has_ie_spending=True,
+        ))
+        added += 1
+
+    session.flush()
+    print(f"[race_candidates] Synced IE candidates: {added} new")
+    return added

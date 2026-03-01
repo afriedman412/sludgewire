@@ -26,7 +26,6 @@ def fetch_fec_candidates(state: str, office: str, district: str | None,
         "is_active_candidate": "true",
         "api_key": api_key,
         "per_page": 100,
-        "sort": "-receipts",
     }
     if office == "H" and district:
         params["district"] = district.lstrip("0") or "0"

@@ -546,7 +546,8 @@ def api_race_candidates(
     session: Session = Depends(get_session),
 ):
     """All known candidates for a race (state+office+district), including opponents
-    with no IE spending. race_key format: 'SEN' or '01', '02', etc."""
+    with no IE spending. race_key format: 'SEN' or '01', '02', etc.
+    Auto-fetches from FEC API if fewer than 2 candidates are cached."""
     state = state.upper()
     if race_key.upper() == "SEN":
         office = "S"
@@ -563,6 +564,13 @@ def api_race_candidates(
           AND (:district = '' OR district = :district OR district = '')
         ORDER BY has_ie_spending DESC, party, candidate_name
     """), {"state": state, "office": office, "district": district}).all()
+
+    # Auto-fetch from FEC if we have fewer than 2 candidates
+    if len(rows) < 2:
+        try:
+            rows = _backfill_race_from_fec(session, state, office, district, rows)
+        except Exception as e:
+            print(f"[race_candidates] FEC backfill error for {state}-{race_key}: {e}")
 
     return {
         "state": state,
@@ -581,6 +589,61 @@ def api_race_candidates(
             for r in rows
         ],
     }
+
+
+def _backfill_race_from_fec(session, state, office, district, existing_rows):
+    """Fetch top funded candidates from FEC API and cache in race_candidates."""
+    import requests
+    from .schemas import RaceCandidate
+
+    api_key = settings.gov_api_key or "DEMO_KEY"
+    params = {
+        "state": state,
+        "office": office,
+        "election_year": 2026,
+        "has_raised_funds": "true",
+        "is_active_candidate": "true",
+        "api_key": api_key,
+        "per_page": 10,
+    }
+    if office == "H" and district:
+        params["district"] = district.lstrip("0") or "0"
+
+    resp = requests.get("https://api.open.fec.gov/v1/candidates/",
+                        params=params, timeout=15)
+    if resp.status_code != 200:
+        return existing_rows
+
+    fec_cands = resp.json().get("results", [])
+    existing_ids = {r.candidate_id for r in existing_rows}
+    new_rows = list(existing_rows)
+
+    for fc in fec_cands:
+        cid = fc.get("candidate_id")
+        if not cid or cid in existing_ids:
+            continue
+        party = fc.get("party")
+        if not party:
+            continue
+
+        rc = RaceCandidate(
+            candidate_id=cid,
+            candidate_name=fc.get("name"),
+            party=party,
+            state=state,
+            office=office,
+            district=district or "",
+            has_ie_spending=False,
+        )
+        session.add(rc)
+        existing_ids.add(cid)
+        # Mimic the row shape for the response
+        new_rows.append(rc)
+
+    session.commit()
+    race_label = f"{state}-{'SEN' if office == 'S' else district or '??'}"
+    print(f"[race_candidates] Backfilled {len(new_rows) - len(existing_rows)} candidates for {race_label} from FEC")
+    return new_rows
 
 
 @app.get("/api/category/pac/{committee_id}/candidates/{candidate_id}/industries")
