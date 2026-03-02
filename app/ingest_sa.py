@@ -111,20 +111,22 @@ def run_sa(
 
     max_per_run = get_max_new_per_run(session)
 
-    # Find target PAC F3X filings with no SA ingestion task yet
-    sa_exists = exists(
+    # Find target PAC F3X filings with no successful SA ingestion task
+    # (skip filings that succeeded or were skipped, but retry failed ones)
+    sa_done = exists(
         select(IngestionTask.filing_id)
         .where(IngestionTask.filing_id == FilingF3X.filing_id)
         .where(IngestionTask.source_feed == "SA")
+        .where(IngestionTask.status.notin_(["failed"]))
     )
     stmt = (
         select(FilingF3X)
         .where(FilingF3X.committee_id.in_(target_ids))
-        .where(~sa_exists)
+        .where(~sa_done)
         .order_by(FilingF3X.filed_at_utc.desc())
     )
     filings = session.exec(stmt).all()
-    print(f"[SA] Found {len(filings)} unprocessed F3X filings from "
+    print(f"[SA] Found {len(filings)} unprocessed/failed F3X filings from "
           f"{len(target_ids)} target committees")
 
     for filing in filings:
@@ -133,6 +135,17 @@ def run_sa(
             break
 
         filing_id = filing.filing_id
+
+        # Delete any previous failed task so we can retry
+        existing_task = session.get(IngestionTask, (filing_id, "SA"))
+        if existing_task:
+            if existing_task.status == "failed":
+                print(f"[SA] Retrying previously failed filing {filing_id}")
+                session.delete(existing_task)
+                session.flush()
+            else:
+                result.skipped_count += 1
+                continue
 
         # Claim with source_feed="SA" — skips if already processed
         if not claim_filing(session, filing_id, source_feed="SA"):
