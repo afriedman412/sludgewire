@@ -251,6 +251,7 @@ class PtrFiling(SQLModel, table=True):
     error_message: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
     pdf_url: Optional[str] = None
+    emailed_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

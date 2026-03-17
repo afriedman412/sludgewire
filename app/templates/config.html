@@ -177,6 +177,16 @@
         </div>
     </form>
 
+    <form method="POST" action="/config/settings/ptr_email_enabled" style="margin-top: 8px;">
+        <div class="form-row">
+            <label style="flex: 0 0 auto; padding: 8px 0; display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" name="enabled" value="true" {% if ptr_email_enabled %}checked{% endif %} style="width: 18px; height: 18px;" />
+                House PTR email alerts enabled
+            </label>
+            <button type="submit">Update</button>
+        </div>
+    </form>
+
     <form method="POST" action="/config/settings/max_new_per_run" style="margin-top: 16px;">
         <div class="form-row">
             <label for="max_new_per_run" style="flex: 0 0 auto; padding: 8px 0;">Max filings per run:</label>

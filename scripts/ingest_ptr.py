@@ -108,7 +108,7 @@ def fetch_filing_index(year: int) -> list[dict]:
 def sync_filing_index(session: Session, rows: list[dict], year: int) -> int:
     """Insert new PTR filings from the index. Returns count of new rows."""
     existing = set(
-        r[0] for r in session.exec(
+        session.exec(
             select(PtrFiling.doc_id).where(PtrFiling.filing_year == year)
         ).all()
     )

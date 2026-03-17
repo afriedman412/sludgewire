@@ -19,7 +19,7 @@ from .db import make_engine, init_db
 from .schemas import FilingF3X, IEScheduleE, EmailRecipient, BackfillJob, AppConfig
 import json
 from .auth import verify_admin
-from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled, get_sa_target_committee_ids, get_pac_groups, set_pac_groups
+from .repo import DEFAULT_MAX_NEW_PER_RUN, get_email_enabled, get_ptr_email_enabled, get_sa_target_committee_ids, get_pac_groups, set_pac_groups
 
 # --- App + DB bootstrap ---
 settings = load_settings()
@@ -776,6 +776,9 @@ def config_page(
     # Get email_enabled setting
     email_enabled = get_email_enabled(session)
 
+    # Get PTR email setting
+    ptr_email_enabled = get_ptr_email_enabled(session)
+
     # Get SA target committee IDs
     sa_target_committee_ids = get_sa_target_committee_ids(session)
 
@@ -793,6 +796,7 @@ def config_page(
             "last_cron_run": last_cron_run,
             "max_new_per_run": max_new_per_run,
             "email_enabled": email_enabled,
+            "ptr_email_enabled": ptr_email_enabled,
             "sa_target_committee_ids": sa_target_committee_ids,
             "pac_groups_json": pac_groups_json,
             "message": message,
@@ -901,6 +905,29 @@ def update_email_enabled(
     status = "enabled" if enabled else "disabled"
     return RedirectResponse(
         url=f"/config?message=Email alerts {status}&message_type=success",
+        status_code=303,
+    )
+
+
+@app.post("/config/settings/ptr_email_enabled")
+def update_ptr_email_enabled(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_admin),
+    enabled: bool = Form(False),
+):
+    """Toggle PTR email alerts on/off. Admin-only."""
+    config = session.get(AppConfig, "ptr_email_enabled")
+    if config:
+        config.value = "true" if enabled else "false"
+        config.updated_at = datetime.now(timezone.utc)
+    else:
+        config = AppConfig(key="ptr_email_enabled", value="true" if enabled else "false")
+    session.add(config)
+    session.commit()
+
+    status = "enabled" if enabled else "disabled"
+    return RedirectResponse(
+        url=f"/config?message=PTR email alerts {status}&message_type=success",
         status_code=303,
     )
 

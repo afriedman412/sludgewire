@@ -23,9 +23,9 @@ from app.db import make_engine, init_db
 from app.ingest_f3x import run_f3x
 from app.ingest_ie import run_ie_schedule_e
 from app.ingest_sa import run_sa
-from app.email_service import send_filing_alert
-from app.repo import get_max_new_per_run, get_email_enabled, mark_tasks_emailed
-from app.schemas import AppConfig, FilingF3X, IEScheduleE
+from app.email_service import send_filing_alert, send_ptr_alert
+from app.repo import get_max_new_per_run, get_email_enabled, get_ptr_email_enabled, mark_tasks_emailed
+from app.schemas import AppConfig, FilingF3X, IEScheduleE, PtrFiling, PtrTransaction
 
 from scripts.ingest_ptr import fetch_filing_index, sync_filing_index, process_pending as process_ptr_pending
 
@@ -193,6 +193,52 @@ def run_job():
                 log(f"PTR: {total_ptr_new} new filings, {total_ptr_parsed} parsed")
         except Exception as e:
             log(f"PTR error: {e}")
+
+        # Send PTR email alerts (separate from FEC alerts)
+        if total_ptr_parsed > 0:
+            try:
+                with Session(engine) as session:
+                    if get_ptr_email_enabled(session):
+                        # Find ingested filings not yet emailed
+                        unemailed = session.exec(
+                            select(PtrFiling)
+                            .where(PtrFiling.status == "ingested")
+                            .where(PtrFiling.emailed_at == None)
+                        ).all()
+                        if unemailed:
+                            filings_data = []
+                            for f in unemailed:
+                                filer_name = " ".join(
+                                    p for p in [f.prefix, f.first_name, f.last_name, f.suffix] if p
+                                )
+                                # Get transaction count and tickers
+                                txns = session.exec(
+                                    select(PtrTransaction)
+                                    .where(PtrTransaction.doc_id == f.doc_id)
+                                ).all()
+                                tickers = ", ".join(sorted(set(
+                                    t.ticker for t in txns if t.ticker
+                                )))
+                                filings_data.append({
+                                    "filer_name": filer_name,
+                                    "state_district": f.state_district,
+                                    "filing_date": str(f.filing_date) if f.filing_date else "",
+                                    "transaction_count": len(txns),
+                                    "tickers": tickers,
+                                    "pdf_url": f.pdf_url or "",
+                                })
+                            sent = send_ptr_alert(session, filings_data)
+                            if sent:
+                                now = datetime.now(timezone.utc)
+                                for f in unemailed:
+                                    f.emailed_at = now
+                                    session.add(f)
+                                session.commit()
+                                log(f"Sent PTR alert for {len(unemailed)} filings to {len(sent)} recipients")
+                    else:
+                        log("PTR email alerts disabled in config, skipping")
+            except Exception as e:
+                log(f"PTR email error (non-fatal): {e}")
 
         results["ptr_new"] = total_ptr_new
         results["ptr_parsed"] = total_ptr_parsed

@@ -38,6 +38,14 @@ def get_email_enabled(session: Session) -> bool:
     return True  # Default to enabled
 
 
+def get_ptr_email_enabled(session: Session) -> bool:
+    """Check if PTR email alerts are enabled."""
+    config = session.get(AppConfig, "ptr_email_enabled")
+    if config and config.value:
+        return config.value.lower() in ("true", "1", "yes")
+    return False  # Default to disabled
+
+
 def claim_filing(session: Session, filing_id: int, source_feed: str) -> bool:
     """
     Returns True if we successfully claimed this filing_id+source_feed (first time seen).

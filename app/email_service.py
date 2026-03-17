@@ -211,6 +211,78 @@ def _build_alert_email(
     return subject, body_html
 
 
+def _build_ptr_alert_email(filings: List[dict]) -> tuple[str, str]:
+    """Build subject and HTML body for a PTR alert."""
+    subject = f"House PTR Alert: {len(filings)} new filing(s)"
+
+    rows_html = ""
+    for f in filings:
+        name = f.get("filer_name", "N/A")
+        state = f.get("state_district", "")
+        n_txns = f.get("transaction_count", 0)
+        tickers = f.get("tickers", "")
+        date_str = f.get("filing_date", "")
+        pdf_url = f.get("pdf_url", "#")
+
+        rows_html += f"""
+        <tr>
+            <td>{name}</td>
+            <td>{state}</td>
+            <td>{date_str}</td>
+            <td style="text-align: right;">{n_txns}</td>
+            <td>{tickers}</td>
+            <td><a href="{pdf_url}">PDF</a></td>
+        </tr>
+        """
+
+    body_html = f"""
+    <html>
+    <body style="font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif;">
+        <h2>House Periodic Transaction Reports</h2>
+        <p>Found {len(filings)} new PTR filing(s).</p>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; font-size: 14px;">
+            <tr style="background: #f6f6f6;">
+                <th>Member</th>
+                <th>State</th>
+                <th>Filed</th>
+                <th># Txns</th>
+                <th>Tickers</th>
+                <th>Report</th>
+            </tr>
+            {rows_html}
+        </table>
+        <p style="margin-top: 20px; color: #666; font-size: 12px;">
+            This is an automated alert from FEC Monitor.
+        </p>
+    </body>
+    </html>
+    """
+    return subject, body_html
+
+
+def send_ptr_alert(session: Session, filings: List[dict]) -> Dict[str, int]:
+    """Send PTR alert emails to all active recipients (no committee filtering).
+
+    Args:
+        session: Database session
+        filings: List of PTR filing summary dicts
+
+    Returns:
+        Dict mapping email address to number of filings sent.
+    """
+    recipients = get_active_recipients(session)
+    if not recipients or not filings:
+        return {}
+
+    subject, body_html = _build_ptr_alert_email(filings)
+    sent: Dict[str, int] = {}
+    for recipient in recipients:
+        ok = send_email([recipient.email], subject, body_html)
+        if ok:
+            sent[recipient.email] = len(filings)
+    return sent
+
+
 def send_filing_alert(
     session: Session,
     filing_type: str,
