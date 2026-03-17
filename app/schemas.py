@@ -232,6 +232,55 @@ class BackfillJob(SQLModel, table=True):
     error_message: Optional[str] = None
 
 
+class PtrFiling(SQLModel, table=True):
+    """House financial disclosure PTR filing index (from bulk ZIP)."""
+    __tablename__ = "ptr_filings"
+
+    doc_id: str = Field(primary_key=True)  # from FD ZIP
+    first_name: str
+    last_name: str
+    prefix: Optional[str] = None
+    suffix: Optional[str] = None
+    state_district: Optional[str] = Field(default=None, index=True)
+    filing_year: int = Field(index=True)
+    filing_date: Optional[date] = Field(default=None, index=True)
+    filing_type: str = Field(default="P", index=True)  # P=PTR, A=amendment, etc.
+
+    # Ingestion status: pending → downloading → parsing → ingested | failed | skipped
+    status: str = Field(default="pending", index=True)
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+    pdf_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PtrTransaction(SQLModel, table=True):
+    """Individual transaction from a House PTR filing."""
+    __tablename__ = "ptr_transactions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    doc_id: str = Field(index=True)  # FK to ptr_filings
+    filer_name: str = Field(index=True)
+    state_district: Optional[str] = Field(default=None, index=True)
+
+    owner: Optional[str] = None  # SP, JT, DC
+    asset: str  # full asset description
+    ticker: Optional[str] = Field(default=None, index=True)  # extracted ticker symbol
+    asset_type: Optional[str] = None  # ST, GS, OP, etc.
+    transaction_type: Optional[str] = Field(default=None, index=True)  # P, S, E
+    transaction_date: Optional[date] = Field(default=None, index=True)
+    notification_date: Optional[date] = None
+    amount: Optional[str] = None  # range string e.g. "$1,001 - $15,000"
+    cap_gains_over_200: Optional[bool] = None
+    description: Optional[str] = None
+    subholding_of: Optional[str] = None
+    filing_status: Optional[str] = None  # New, etc.
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class AppConfig(SQLModel, table=True):
     __tablename__ = "app_config"
 

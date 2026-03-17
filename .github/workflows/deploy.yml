@@ -72,6 +72,7 @@ jobs:
             --set-env-vars "EMAIL_FROM=${{ secrets.EMAIL_FROM }}" \
             --set-env-vars "CONFIG_PASSWORD=${{ secrets.CONFIG_PASSWORD }}" \
             --set-env-vars "GOV_API_KEY=${{ secrets.GOV_API_KEY }}" \
+            --set-env-vars "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
             --add-cloudsql-instances ${{ secrets.CLOUD_SQL_CONNECTION }} \
             --memory 4Gi
 

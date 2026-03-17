@@ -27,6 +27,8 @@ from app.email_service import send_filing_alert
 from app.repo import get_max_new_per_run, get_email_enabled, mark_tasks_emailed
 from app.schemas import AppConfig, FilingF3X, IEScheduleE
 
+from scripts.ingest_ptr import fetch_filing_index, sync_filing_index, process_pending as process_ptr_pending
+
 
 MAX_ITERATIONS = 50  # Safety limit to prevent infinite loops
 MAX_RUNTIME_MINUTES = 55  # Leave buffer before Cloud Run's 60 min timeout
@@ -70,6 +72,8 @@ def run_job():
     total_ie_events = 0
     total_sa_filings = 0
     total_sa_events = 0
+    total_ptr_new = 0
+    total_ptr_parsed = 0
 
     results = {
         "status": "running",
@@ -81,6 +85,8 @@ def run_job():
         "ie_events_new": 0,
         "sa_filings": 0,
         "sa_events": 0,
+        "ptr_new": 0,
+        "ptr_parsed": 0,
         "iterations": 0,
         "email_sent": False,
         "emails_sent_to": [],
@@ -176,11 +182,27 @@ def run_job():
                 log("Partial batch - likely caught up")
                 break
 
+        # Run House PTR ingestion (once per job, not per iteration)
+        try:
+            from datetime import date as date_cls
+            year = date_cls.today().year
+            with Session(engine) as session:
+                rows = fetch_filing_index(year)
+                total_ptr_new = sync_filing_index(session, rows, year)
+                total_ptr_parsed = process_ptr_pending(session, year, max_count=50)
+                log(f"PTR: {total_ptr_new} new filings, {total_ptr_parsed} parsed")
+        except Exception as e:
+            log(f"PTR error: {e}")
+
+        results["ptr_new"] = total_ptr_new
+        results["ptr_parsed"] = total_ptr_parsed
+
         elapsed = (time.time() - start_time) / 60
         log(f"Job complete in {elapsed:.1f} min over {iteration} iterations")
         log(f"Totals: F3X={total_f3x}, IE filings={total_ie_filings}, "
             f"IE events={total_ie_events}, SA filings={total_sa_filings}, "
-            f"SA events={total_sa_events}")
+            f"SA events={total_sa_events}, PTR new={total_ptr_new}, "
+            f"PTR parsed={total_ptr_parsed}")
 
         # Send email if we found new high-value filings
         if total_f3x > 0 or total_ie_events > 0:
